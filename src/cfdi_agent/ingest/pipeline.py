@@ -21,7 +21,7 @@ from psycopg import Connection
 
 from cfdi_agent.config import get_config
 from cfdi_agent.db import repo
-from cfdi_agent.extract.xml_parser import CfdiParseError, parse_cfdi_bytes
+from cfdi_agent.extract.router import UnroutableDocument, route_document
 from cfdi_agent.ingest.dedupe import sha256_bytes
 from cfdi_agent.validate.rules import Anomaly, validate_invoice
 
@@ -117,14 +117,17 @@ def ingest_bytes(
             ),
         )
 
+    # The router picks the extraction layer: XML goes to the deterministic
+    # parser, a PDF or an image goes to the vision path. Nothing above this
+    # line knows which one ran.
     try:
-        inv = parse_cfdi_bytes(data)
-    except CfdiParseError as exc:
+        routed = route_document(data, filename=file_path)
+    except UnroutableDocument as exc:
         repo.enqueue_review(
             conn,
             file_hash=file_hash,
             file_path=file_path,
-            reason=f"no se pudo parsear: {exc}",
+            reason=str(exc),
             payload={"bytes": len(data)},
         )
         repo.record_extraction_run(
@@ -150,6 +153,7 @@ def ingest_bytes(
             status="needs_review", uuid=None, invoice_id=None, summary=summary
         )
 
+    inv = routed.invoice
     ctx = repo.build_history_context(conn, inv)
     result = validate_invoice(inv, ctx, company_rfc=company_rfc)
 
@@ -165,10 +169,13 @@ def ingest_bytes(
     repo.record_extraction_run(
         conn,
         file_hash=file_hash,
-        tier=0,
-        provider="none",
-        model=None,
+        tier=routed.tier,
+        provider=routed.provider,
+        model=routed.model,
         latency_ms=int((time.perf_counter() - started) * 1000),
+        tokens_in=routed.tokens_in,
+        tokens_out=routed.tokens_out,
+        cost_usd=routed.cost_usd,
         ok=True,
     )
 

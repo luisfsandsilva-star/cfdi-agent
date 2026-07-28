@@ -1,12 +1,12 @@
 # Eval report
 
-Generated 2026-07-28T04:52:55+00:00 · corpus 300 · seed 1312 · defect rate 25%
+Generated 2026-07-28T21:01:56+00:00 · corpus 300 · seed 1312 · defect rate 25%
 
 Every figure below is produced by `python -m evals.run_eval` against a dedicated `cfdi_eval` database. Nothing here is estimated.
 
 ## Ingest
 
-300 documents in 9.81s (31/s)
+300 documents in 8.89s (34/s)
 
 | status | n |
 |---|---:|
@@ -54,7 +54,7 @@ These describe an invoice rather than accuse it, so they have no injected ground
 
 | percentile | ms |
 |---|---:|
-| p50 | 17 |
+| p50 | 15 |
 | p95 | 22 |
 | max | 25 |
 

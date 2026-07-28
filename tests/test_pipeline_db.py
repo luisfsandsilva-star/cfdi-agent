@@ -295,3 +295,47 @@ def test_an_unreadable_document_is_remembered(tmp_path) -> None:
     assert _ingest(junk).status == "needs_review"
     assert _ingest(junk).status == "duplicate_file"
     assert fetch_one("SELECT count(*) AS n FROM review_queue")["n"] == 1
+
+
+def test_pdf_without_credentials_reaches_review_with_a_useful_reason(
+    tmp_path, monkeypatch
+) -> None:
+    """The reason in the queue must tell the operator what to do.
+
+    Regression guard for the missing router. A PDF used to fail XML parsing
+    and arrive as "no se pudo parsear" — accurate, useless, and it hid the
+    fact that pdf_vision.py was written but connected to nothing.
+    """
+    from cfdi_agent.config import get_config
+    from cfdi_agent.db.conn import fetch_one
+
+    pdf = tmp_path / "escaneo.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\nfake scan")
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    get_config.cache_clear()
+    try:
+        outcome = _ingest(pdf)
+    finally:
+        get_config.cache_clear()
+
+    assert outcome.status == "needs_review"
+    reason = fetch_one("SELECT reason FROM review_queue")["reason"]
+    assert "visión" in reason and "ANTHROPIC_API_KEY" in reason
+    assert "no se pudo parsear" not in reason
+
+
+def test_a_pdf_is_recognized_as_a_pdf_not_as_broken_xml(tmp_path, monkeypatch) -> None:
+    from cfdi_agent.config import get_config
+
+    pdf = tmp_path / "factura.pdf"
+    pdf.write_bytes(b"%PDF-1.7 contenido")
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    get_config.cache_clear()
+    try:
+        summary = _ingest(pdf).summary
+    finally:
+        get_config.cache_clear()
+    assert "application/pdf" in summary
