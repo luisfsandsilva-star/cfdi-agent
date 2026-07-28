@@ -1,0 +1,52 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: cfdi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cfdi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cfdi}
+      POSTGRES_DB: ${POSTGRES_DB:-cfdi}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Applied once, on first init of an empty volume. To re-apply after edits:
+      #   docker compose down -v && docker compose up -d
+      # or: python -m cfdi_agent.db.init  (idempotent, no volume wipe)
+      - ./src/cfdi_agent/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cfdi} -d ${POSTGRES_DB:-cfdi}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  n8n:
+    # Pin this after the first successful boot:
+    #   docker compose exec n8n n8n --version   → set N8N_VERSION in .env
+    image: n8nio/n8n:${N8N_VERSION:-latest}
+    container_name: cfdi-n8n
+    restart: unless-stopped
+    environment:
+      N8N_PUBLIC_API_DISABLED: "false"
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-dev-only-change-me}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_RUNNERS_ENABLED: "true"
+      N8N_HOST: localhost
+      N8N_PORT: "5678"
+      WEBHOOK_URL: http://localhost:5678/
+      GENERIC_TIMEZONE: America/Monterrey
+      TZ: America/Monterrey
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8ndata:/home/node/.n8n
+      - ./flows/exported:/flows:ro
+    # Lets n8n reach the FastAPI app running on the host during development
+    # (http://host.docker.internal:8000). Required on Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  pgdata:
+  n8ndata:

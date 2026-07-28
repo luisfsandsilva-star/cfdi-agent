@@ -1,0 +1,82 @@
+{#-
+  CFDI 4.0 (Comprobante Fiscal Digital por Internet), structural subset.
+
+  Faithful to the real XSD in the parts the pipeline reads: namespaces,
+  PascalCase attribute names, the Conceptos/Impuestos nesting, and the
+  TimbreFiscalDigital complement carrying the UUID.
+
+  NOT faithful in: Sello, Certificado, SelloCFD and SelloSAT are placeholders.
+  Real ones are RSA signatures over the original string, produced by a PAC.
+  Nothing downstream verifies them, and the README says so plainly rather than
+  implying this validates a cryptographic seal.
+
+  Every text value goes through `|e` — Faker generates company names with `&`
+  in them, which would otherwise produce malformed XML.
+-#}
+<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante
+    xmlns:cfdi="http://www.sat.gob.mx/cfd/4"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd"
+    Version="4.0"
+    {% if serie %}Serie="{{ serie|e }}" {% endif %}{% if folio %}Folio="{{ folio|e }}" {% endif %}
+    Fecha="{{ fecha_emision }}"
+    Sello="{{ sello }}"
+    NoCertificado="{{ no_certificado }}"
+    Certificado="{{ certificado }}"
+    SubTotal="{{ subtotal }}"
+    {% if descuento and descuento != "0.00" %}Descuento="{{ descuento }}" {% endif %}
+    Moneda="{{ moneda }}"
+    {% if tipo_cambio %}TipoCambio="{{ tipo_cambio }}" {% endif %}
+    Total="{{ total }}"
+    TipoDeComprobante="I"
+    Exportacion="01"
+    MetodoPago="{{ metodo_pago }}"
+    FormaPago="{{ forma_pago }}"
+    LugarExpedicion="{{ lugar_expedicion }}">
+  <cfdi:Emisor Rfc="{{ rfc_emisor|e }}" Nombre="{{ nombre_emisor|e }}" RegimenFiscal="{{ regimen_emisor }}"/>
+  <cfdi:Receptor Rfc="{{ rfc_receptor|e }}" Nombre="{{ nombre_receptor|e }}" DomicilioFiscalReceptor="{{ domicilio_receptor }}" RegimenFiscalReceptor="{{ regimen_receptor }}" UsoCFDI="{{ uso_cfdi }}"/>
+  <cfdi:Conceptos>
+    {%- for c in conceptos %}
+    <cfdi:Concepto ClaveProdServ="{{ c.clave_prod_serv }}" Cantidad="{{ c.cantidad }}" ClaveUnidad="{{ c.clave_unidad }}" Descripcion="{{ c.descripcion|e }}" ValorUnitario="{{ c.valor_unitario }}" Importe="{{ c.importe }}"{% if c.descuento and c.descuento != "0.00" %} Descuento="{{ c.descuento }}"{% endif %} ObjetoImp="{{ c.objeto_imp }}">
+      {%- if c.traslado %}
+      <cfdi:Impuestos>
+        <cfdi:Traslados>
+          <cfdi:Traslado Base="{{ c.traslado.base }}" Impuesto="{{ c.traslado.impuesto }}" TipoFactor="Tasa" TasaOCuota="{{ c.traslado.tasa }}" Importe="{{ c.traslado.importe }}"/>
+        </cfdi:Traslados>
+      </cfdi:Impuestos>
+      {%- endif %}
+    </cfdi:Concepto>
+    {%- endfor %}
+  </cfdi:Conceptos>
+  {%- if traslados or retenciones %}
+  <cfdi:Impuestos{% if retenciones %} TotalImpuestosRetenidos="{{ total_retenciones }}"{% endif %}{% if traslados %} TotalImpuestosTrasladados="{{ total_traslados }}"{% endif %}>
+    {%- if retenciones %}
+    <cfdi:Retenciones>
+      {%- for r in retenciones %}
+      <cfdi:Retencion Impuesto="{{ r.impuesto }}" Importe="{{ r.importe }}"/>
+      {%- endfor %}
+    </cfdi:Retenciones>
+    {%- endif %}
+    {%- if traslados %}
+    <cfdi:Traslados>
+      {%- for t in traslados %}
+      <cfdi:Traslado Base="{{ t.base }}" Impuesto="{{ t.impuesto }}" TipoFactor="Tasa" TasaOCuota="{{ t.tasa }}" Importe="{{ t.importe }}"/>
+      {%- endfor %}
+    </cfdi:Traslados>
+    {%- endif %}
+  </cfdi:Impuestos>
+  {%- endif %}
+  <cfdi:Complemento>
+    <tfd:TimbreFiscalDigital
+        xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+        xsi:schemaLocation="http://www.sat.gob.mx/TimbreFiscalDigital http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd"
+        Version="1.1"
+        UUID="{{ uuid }}"
+        FechaTimbrado="{{ fecha_timbrado }}"
+        RfcProvCertif="{{ rfc_pac }}"
+        SelloCFD="{{ sello }}"
+        NoCertificadoSAT="{{ no_certificado_sat }}"
+        SelloSAT="{{ sello_sat }}"/>
+  </cfdi:Complemento>
+</cfdi:Comprobante>

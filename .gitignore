@@ -1,0 +1,22 @@
+.env
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated artifacts. All of these are fully determined by the generator plus
+# a fixed --seed, so the seed is what gets committed, not the output.
+#
+# Committing labeled.jsonl was tempting ("it is the eval contract") and is a
+# trap: the generator is still changing, and a labels file that no longer
+# matches it silently scores detectors against defects the corpus does not
+# contain. Regenerate instead:
+#   python -m synth.generate_cfdi --n 60 --seed 1312 --out data/synth
+data/
+evals/datasets/*.jsonl
+evals/report.md
