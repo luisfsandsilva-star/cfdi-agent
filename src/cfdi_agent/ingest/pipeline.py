@@ -103,13 +103,18 @@ def ingest_bytes(
 
     # Retry guard, before anything else. The same bytes arriving twice is an
     # n8n redelivery, not a fiscal duplicate, and must not raise an alert.
-    existing = repo.file_already_ingested(conn, file_hash)
-    if existing:
+    # Reads `processed_files`, which records every outcome — an invoices-only
+    # check misses the documents we deliberately do not insert.
+    seen = repo.file_already_processed(conn, file_hash)
+    if seen:
         return IngestOutcome(
             status="duplicate_file",
-            uuid=existing["uuid"],
-            invoice_id=existing["id"],
-            summary=f"Archivo ya procesado (UUID {existing['uuid']}); sin cambios.",
+            uuid=seen["uuid"],
+            invoice_id=None,
+            summary=(
+                f"Archivo ya procesado (visto {seen['seen_count']} veces, "
+                f"resultado original: {seen['status']}); sin cambios."
+            ),
         )
 
     try:
@@ -132,11 +137,17 @@ def ingest_bytes(
             ok=False,
             error=str(exc),
         )
-        return IngestOutcome(
+        summary = f"No se pudo leer el documento: {exc}"
+        repo.record_processed_file(
+            conn,
+            file_hash=file_hash,
+            file_path=file_path,
             status="needs_review",
-            uuid=None,
-            invoice_id=None,
-            summary=f"No se pudo leer el documento: {exc}",
+            invoice_uuid=None,
+            summary=summary,
+        )
+        return IngestOutcome(
+            status="needs_review", uuid=None, invoice_id=None, summary=summary
         )
 
     ctx = repo.build_history_context(conn, inv)
@@ -165,6 +176,14 @@ def ingest_bytes(
         _summarize(inv, result.anomalies)
         if result.accepted
         else f"Rechazada: {result.reject_reason}"
+    )
+    repo.record_processed_file(
+        conn,
+        file_hash=file_hash,
+        file_path=file_path,
+        status=persisted.status,
+        invoice_uuid=inv.uuid,
+        summary=summary,
     )
     return IngestOutcome(
         status=persisted.status,

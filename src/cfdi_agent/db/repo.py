@@ -65,20 +65,61 @@ def _norm_uuid(value: Any) -> str:
     return str(value).upper()
 
 
-def file_already_ingested(conn: Connection[Any], file_hash: str) -> dict | None:
-    """Same bytes seen before? Returns the existing invoice row, or None.
+def file_already_processed(conn: Connection[Any], file_hash: str) -> dict | None:
+    """Same bytes seen before, whatever happened to them? Bumps the counter.
 
-    This is the retry guard. It must run before anything else, or an n8n
-    redelivery would be scored as a fiscal duplicate.
+    The retry guard, and it reads `processed_files` rather than
+    `invoices.file_hash` on purpose. A duplicate-UUID submission is never
+    inserted into `invoices`, so an invoices-only check never recognized it and
+    every redelivery produced another critical anomaly — 16 more per pass over
+    the same corpus, unbounded. In production that is a webhook retry spamming
+    the alert channel.
+
+    Returns the recorded outcome so a redelivery replays the original verdict
+    instead of re-deriving it.
     """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, uuid FROM invoices WHERE file_hash = %s", (file_hash,)
+            """
+            UPDATE processed_files
+               SET seen_count = seen_count + 1, last_seen = now()
+             WHERE file_hash = %s
+         RETURNING status, invoice_uuid, summary, seen_count
+            """,
+            (file_hash,),
         )
         row = cur.fetchone()
     if row is None:
         return None
-    return {"id": row["id"], "uuid": _norm_uuid(row["uuid"])}
+    return {
+        "status": row["status"],
+        "uuid": _norm_uuid(row["invoice_uuid"]) if row["invoice_uuid"] else None,
+        "summary": row["summary"],
+        "seen_count": row["seen_count"],
+    }
+
+
+def record_processed_file(
+    conn: Connection[Any],
+    *,
+    file_hash: str,
+    file_path: str,
+    status: str,
+    invoice_uuid: str | None,
+    summary: str,
+) -> None:
+    """Remember this document was handled, so a retry is a no-op."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO processed_files
+                (file_hash, file_path, status, invoice_uuid, summary)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (file_hash) DO UPDATE
+               SET last_seen = now(), seen_count = processed_files.seen_count + 1
+            """,
+            (file_hash, file_path, status, invoice_uuid, summary),
+        )
 
 
 def build_history_context(conn: Connection[Any], inv: ParsedInvoice) -> HistoryContext:

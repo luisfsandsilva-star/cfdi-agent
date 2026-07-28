@@ -89,6 +89,28 @@ CREATE TABLE IF NOT EXISTS taxes (
 
 CREATE INDEX IF NOT EXISTS idx_taxes_invoice ON taxes (invoice_id);
 
+-- --------------------------------------------------------- processed_files
+-- Every document that has been through the pipeline, whatever the outcome.
+--
+-- The retry guard cannot read `invoices.file_hash` alone: a duplicate-UUID
+-- submission is deliberately never inserted there, so it was never recognized
+-- on redelivery and produced a fresh critical anomaly on every retry. Measured
+-- by re-running the same 300-document corpus: duplicate_uuid anomalies grew
+-- 16 per pass, unbounded. In production that is an n8n redelivery spamming the
+-- alert channel until someone mutes it.
+--
+-- Same lesson as `seen_folios`: record what was *seen*, not what was *stored*.
+CREATE TABLE IF NOT EXISTS processed_files (
+    file_hash    TEXT PRIMARY KEY,
+    file_path    TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    invoice_uuid UUID,
+    summary      TEXT,
+    first_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    seen_count   INT NOT NULL DEFAULT 1
+);
+
 -- ------------------------------------------------------------- seen_folios
 -- Every folio we have *observed*, written before any persistence decision.
 --

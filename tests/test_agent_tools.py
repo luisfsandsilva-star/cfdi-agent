@@ -68,7 +68,8 @@ def seeded(tmp_path_factory):
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             "TRUNCATE invoices, suppliers, line_items, taxes, anomalies, "
-            "review_queue, extraction_runs, seen_folios RESTART IDENTITY CASCADE"
+            "review_queue, extraction_runs, seen_folios, processed_files "
+            "RESTART IDENTITY CASCADE"
         )
 
     out = tmp_path_factory.mktemp("agent_corpus")

@@ -73,7 +73,8 @@ def clean_tables():
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             "TRUNCATE invoices, suppliers, line_items, taxes, anomalies, "
-            "review_queue, extraction_runs, seen_folios RESTART IDENTITY CASCADE"
+            "review_queue, extraction_runs, seen_folios, processed_files "
+            "RESTART IDENTITY CASCADE"
         )
     yield
 
@@ -135,7 +136,7 @@ def test_same_file_twice_is_idempotent(corpus) -> None:
     second = _ingest(out / labels[0]["file"])
 
     assert second.status == "duplicate_file"
-    assert second.invoice_id == first.invoice_id
+    assert second.uuid == first.uuid
     assert second.anomalies == []
     assert fetch_one("SELECT count(*) AS n FROM invoices")["n"] == 1
     assert fetch_one("SELECT count(*) AS n FROM anomalies")["n"] == 0
@@ -251,3 +252,46 @@ def test_history_context_is_scoped_to_the_invoice(corpus) -> None:
     claves_on_invoice = {c.clave_prod_serv for c in inv.conceptos}
     for _rfc, clave in ctx.price_stats:
         assert clave in claves_on_invoice
+
+
+def test_a_declined_document_is_also_idempotent(corpus, tmp_path) -> None:
+    """Retries must be a no-op for *every* outcome, not just accepted invoices.
+
+    Regression guard. The retry guard used to read `invoices.file_hash`, and a
+    duplicate-UUID submission is deliberately never inserted there — so every
+    redelivery re-derived the verdict and wrote another critical anomaly.
+    Re-running one 300-document corpus grew duplicate_uuid anomalies by 16 per
+    pass, unbounded; in production that is a webhook retry spamming Slack.
+    """
+    from cfdi_agent.db.conn import fetch_one
+
+    out, labels = corpus
+    original = (out / labels[0]["file"]).read_bytes()
+    twin = tmp_path / "twin.xml"
+    twin.write_bytes(original.replace(b"</cfdi:Comprobante>", b"\n</cfdi:Comprobante>"))
+
+    _ingest(out / labels[0]["file"])
+    first = _ingest(twin)
+    assert first.status == "anomaly"
+    after_first = fetch_one("SELECT count(*) AS n FROM anomalies")["n"]
+
+    for _ in range(3):
+        again = _ingest(twin)
+        assert again.status == "duplicate_file"
+
+    assert fetch_one("SELECT count(*) AS n FROM anomalies")["n"] == after_first
+    assert fetch_one(
+        "SELECT seen_count AS n FROM processed_files WHERE status = 'anomaly'"
+    )["n"] == 4
+
+
+def test_an_unreadable_document_is_remembered(tmp_path) -> None:
+    """Junk must not be re-queued for review on every retry either."""
+    from cfdi_agent.db.conn import fetch_one
+
+    junk = tmp_path / "junk.xml"
+    junk.write_bytes(b"<html><body>Su factura adjunta</body></html>")
+
+    assert _ingest(junk).status == "needs_review"
+    assert _ingest(junk).status == "duplicate_file"
+    assert fetch_one("SELECT count(*) AS n FROM review_queue")["n"] == 1
