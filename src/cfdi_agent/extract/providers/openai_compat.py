@@ -57,6 +57,10 @@ from cfdi_agent.schemas import InvoiceExtraction
 # confused when the harness reports cost per invoice.
 LOCAL_COST = None
 
+# Generous for a batch of descriptions, short enough that an unreachable host
+# fails fast instead of stalling ingest.
+EMBED_TIMEOUT = 15.0
+
 
 class OpenAICompatProvider(LLMProvider):
     name = "local"
@@ -145,7 +149,10 @@ class OpenAICompatProvider(LLMProvider):
             resp = httpx.post(
                 url,
                 json={"model": self.embed_model, "input": texts},
-                timeout=self.timeout,
+                # Not `self.timeout`: that budget exists for a vision model
+                # generating tokens. An embedding call is milliseconds of
+                # compute, so a long wait here only means the host is gone.
+                timeout=EMBED_TIMEOUT,
             )
             resp.raise_for_status()
             body = resp.json()

@@ -39,30 +39,42 @@ De `python -m evals.run_eval` — 300 facturas sintéticas, seed 1312, contra un
 base dedicada. Se regenera con un comando; nada de esto es estimado.
 
 **Exactitud campo a campo, tier 0** — 100% en `uuid`, `rfc_emisor`,
-`rfc_receptor`, `subtotal`, `total`, `moneda`, `n_conceptos` (287/287 cada uno).
+`rfc_receptor`, `subtotal`, `total`, `moneda`, `n_conceptos` (286/286 cada uno).
 
 **Detección de anomalías**
 
 | defecto | inyectados | recall | precisión | F1 |
 |---|---:|---:|---:|---:|
-| `bad_rfc` | 16 | 1.00 | 1.00 | 1.00 |
-| `dup_uuid` | 13 | 1.00 | 1.00 | 1.00 |
-| `line_math` | 12 | 1.00 | 1.00 | 1.00 |
-| `price_spike` | 9 | 1.00 | 1.00 | 1.00 |
-| `total_mismatch` | 11 | 1.00 | 1.00 | 1.00 |
-| `folio_gap` | 12 | 1.00 | **0.48** | 0.65 |
+| `bad_rfc` | 10 | 1.00 | 1.00 | 1.00 |
+| `dup_uuid` | 14 | 1.00 | 1.00 | 1.00 |
+| `folio_gap` | 12 | 1.00 | 0.60 | 0.75 |
+| `line_math` | 4 | 1.00 | 1.00 | 1.00 |
+| `price_spike` | 10 | 0.90 | 1.00 | 0.95 |
+| `semantic_dup` | 15 | 0.00 | — | — |
+| `total_mismatch` | 6 | 1.00 | 1.00 | 1.00 |
 
-**Rendimiento** 33 documentos/s · p50 15 ms · p95 21 ms
+**Rendimiento** 21 documentos/s · p50 15 ms · p95 22 ms
 **Costo** $0.00 por factura en la ruta XML — no interviene ningún modelo
-**Esquema** 284/300 validan contra el XSD oficial del SAT; los 16 fallos son
+**Esquema** 290/300 validan contra el XSD oficial del SAT; los 16 fallos son
 exactamente los RFCs malformados a propósito
+
+`semantic_dup` sale en recall 0.00 porque la etapa vectorial nunca corrió: esta
+máquina no tiene backend de embeddings, así que ningún concepto se embebió. El
+reporte lo dice en su propia sección en vez de dejar el cero como resultado. El
+detector 2 se prueba contra un embebedor stub; su recall sobre texto reformulado
+está sin medir.
+
+`price_spike` sale en 0.90: uno de diez picos inyectados cayó sobre un producto
+cuyo historial de precios estaba una factura por debajo del piso de cinco
+muestras que el detector exige. Se negó a juzgar, que es el comportamiento
+diseñado.
 
 `folio_gap` es el débil, y el número se publica en vez de enterrarse. Cada falso
 positivo traza a una factura con RFC de emisor malformado, que la archiva bajo
 otro proveedor y deja hueco en la secuencia del real. Discutiblemente el
 veredicto correcto, e inflado aquí por un corpus que corrompe RFCs al ~5%.
 
-**De seis tipos de defecto inyectados, la validación XSD atrapa uno.**
+**De siete tipos de defecto inyectados, la validación XSD atrapa uno.**
 Duplicados, precios inflados y totales que no cuadran son todos perfectamente
 válidos contra el esquema. Pasar validación de esquema no dice nada sobre si una
 factura debe pagarse — que es el argumento entero de la suite de detectores.
@@ -107,6 +119,7 @@ costo. Esa tabla **es** el harness de evaluación y el tablero de costos.
 | 6 | `new_supplier` | Primera factura de ese RFC | info |
 | 7 | `folio_gap` | Salto de secuencia por (emisor, serie) | warn |
 | 8 | `stale_stamp` | Timbrado más de 72h después de emitido | warn |
+| 9 | `unknown_catalog_code` | Código SAT fuera del subconjunto incluido | info |
 
 Cada uno emite `evidence` en JSONB — los valores exactos que dispararon la regla.
 El LLM puede resumir esa evidencia; no puede inventar un hallazgo sin ella.
@@ -230,8 +243,14 @@ corta y honesta.
 - **Los sellos digitales no se verifican.** `Sello`, `Certificado` y `SelloSAT`
   están presentes pero nunca se revisan; hacerlo bien requiere la cadena de
   certificados del PAC.
-- **El estatus SAT está mockeado por defecto.** La consulta real a
-  `ConsultaCFDIService` está detrás de un flag.
+- **No hay verificación de estatus ante el SAT.** La columna
+  `invoices.sat_status` existe y siempre queda en NULL. Preguntarle al SAT si un
+  UUID sigue vigente requiere el web service `ConsultaCFDIService`, y no está
+  implementado.
+- **El detector 2 necesita un backend de embeddings.** Sin `EMBED_BASE_URL` la
+  etapa vectorial se salta y el motivo queda en `extraction_runs`. Su recall
+  sobre texto reformulado está sin medir, porque medirlo exige un modelo
+  corriendo.
 - **Los catálogos SAT son un subconjunto.** Solo `c_ClaveProdServ` son ~52,000
   filas. Un código desconocido produce una nota `info`, nunca un rechazo.
 - **El dígito verificador del RFC no se calcula.** Adoptar el regex del propio

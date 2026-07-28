@@ -95,6 +95,18 @@ def render_markdown(r: EvalReport) -> str:
             add(f"| `{kind}` | {n} |")
         add("")
 
+    if r.unexercised:
+        add("### Detectors with no opportunity to fire")
+        add("")
+        add("These did not report, and that is not the same as reporting nothing. "
+            "The corpus or the configuration gave them no case to react to.")
+        add("")
+        add("| detector | why |")
+        add("|---|---|")
+        for kind, why in r.unexercised.items():
+            add(f"| `{kind}` | {why} |")
+        add("")
+
     # --------------------------------------------------------------- latency
     add("## Latency")
     add("")
@@ -191,6 +203,7 @@ def to_json(r: EvalReport) -> dict:
             for d in r.detectors
         ],
         "contextual_counts": r.contextual_counts,
+        "unexercised": r.unexercised,
         "latency_ms": r.latency_ms,
         "cost": r.cost,
         "xsd": r.xsd,

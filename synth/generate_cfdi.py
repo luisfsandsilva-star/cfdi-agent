@@ -51,6 +51,7 @@ DEFECT_KINDS = (
     "price_spike",
     "folio_gap",
     "line_math",
+    "semantic_dup",
 )
 
 # A small, realistic product catalog. ClaveProdServ and ClaveUnidad values are
@@ -67,6 +68,19 @@ CATALOG = [
     ("15101506", "LTR", "Combustible diésel", 22, 28),
     ("47131700", "H87", "Insumos de limpieza", 60, 320),
 ]
+
+REWORDS = {
+    "Servicio de consultoría en TI": "Consultoría en tecnologías de información",
+    "Papel bond carta (paquete 500 hojas)": "Paquete papel bond tamaño carta 500 h",
+    "Licencia de software mensual": "Suscripción mensual de software",
+    "Laptop empresarial": "Computadora portátil para empresa",
+    "Mantenimiento preventivo de flotilla": "Servicio preventivo a flotilla vehicular",
+    "Cartucho de tóner": "Tóner de repuesto",
+    "Servicio de limpieza de oficina": "Limpieza de oficinas",
+    "Reparación eléctrica": "Servicio de reparación eléctrica",
+    "Combustible diésel": "Diésel",
+    "Insumos de limpieza": "Artículos de limpieza",
+}
 
 REGIMENES = ["601", "603", "605", "612", "626"]
 USOS_CFDI = ["G01", "G03", "I04", "P01"]
@@ -124,6 +138,9 @@ class Supplier:
     products: list[Product]
     folio: int = 1
     invoices_emitted: int = 0
+    # (product, quantity) of the most recent invoice, so a semantic duplicate
+    # can re-bill exactly the same work under different wording.
+    last_lines: list = field(default_factory=list)
     # (rfc_as_written, clave_prod_serv) -> prior invoices carrying that product.
     #
     # Keyed by the RFC actually written into the XML, not by `self.rfc`, so it
@@ -190,6 +207,18 @@ def _render_invoice(
     n_lines = rng.randint(1, 4)
     chosen = rng.sample(supplier.products, k=min(n_lines, len(supplier.products)))
 
+    # A semantic duplicate re-bills the previous invoice from this supplier:
+    # same products, same quantities, reworded descriptions, a near-identical
+    # total a few days later. Detector #1 cannot see it — the UUID and folio
+    # are legitimately different.
+    twin = getattr(supplier, "last_lines", None)
+    if "semantic_dup" in defects:
+        if twin:
+            keys = {k for k, _ in twin}
+            chosen = [p for p in supplier.products if p.clave_prod_serv in keys]
+        else:
+            defects = [d for d in defects if d != "semantic_dup"]
+
     # `defects` is what the caller asked for; `applied` is what this invoice
     # actually ends up carrying. They differ when a precondition fails, and the
     # label must record `applied` — see the module docstring.
@@ -223,8 +252,16 @@ def _render_invoice(
 
     math_line = rng.randrange(len(chosen)) if "line_math" in applied else -1
 
+    # Keyed by ClaveProdServ: Product is a mutable dataclass and not hashable.
+    twin_qty = (
+        {k: q for k, q in twin} if ("semantic_dup" in applied and twin) else {}
+    )
+
     for idx, product in enumerate(chosen):
-        cantidad = d(rng.randint(1, 12), Decimal("0.000001"))
+        if product.clave_prod_serv in twin_qty:
+            cantidad = twin_qty[product.clave_prod_serv]
+        else:
+            cantidad = d(rng.randint(1, 12), Decimal("0.000001"))
         unit = product.unit_price
         # Normal drift so a real baseline has variance; the outlier detector
         # must survive ordinary price movement without firing.
@@ -244,11 +281,15 @@ def _render_invoice(
             "tasa": f"{IVA}",
             "importe": f"{d(base * IVA)}",
         }
+        descripcion = product.descripcion
+        if "semantic_dup" in applied and twin_qty:
+            descripcion = REWORDS.get(descripcion, descripcion)
+
         conceptos.append(
             {
                 "clave_prod_serv": product.clave_prod_serv,
                 "clave_unidad": product.clave_unidad,
-                "descripcion": product.descripcion,
+                "descripcion": descripcion,
                 "cantidad": f"{cantidad}",
                 "valor_unitario": f"{unit}",
                 "importe": f"{importe}",
@@ -323,6 +364,10 @@ def _render_invoice(
 
     xml = env.get_template("cfdi40.xml.j2").render(**ctx)
     supplier.invoices_emitted += 1
+    supplier.last_lines = [
+        (p.clave_prod_serv, Decimal(c["cantidad"]))
+        for p, c in zip(chosen, conceptos, strict=True)
+    ]
 
     label = {
         "file": f"{supplier.serie}-{folio:06d}.xml",
@@ -403,6 +448,11 @@ def generate(
             if candidate == "dup_uuid":
                 if emitted_uuids:
                     reused_uuid = rng.choice(emitted_uuids)
+                    defects.append(candidate)
+            elif candidate == "semantic_dup":
+                # Needs a previous invoice from this supplier to re-bill, and
+                # the pair has to fall inside the detector's 7-day window.
+                if supplier.last_lines:
                     defects.append(candidate)
             elif candidate == "price_spike":
                 if any(v >= 5 for v in supplier.product_history.values()):

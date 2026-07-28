@@ -42,6 +42,7 @@ DEFECT_TO_KINDS = {
     "dup_uuid": {"duplicate_uuid"},
     "folio_gap": {"folio_gap"},
     "price_spike": {"price_outlier"},
+    "semantic_dup": {"semantic_duplicate"},
 }
 
 # Detectors that fire on context rather than on a defect. Scoring them against
@@ -95,6 +96,7 @@ class EvalReport:
     field_accuracy: dict[str, tuple[int, int]] = field(default_factory=dict)
     detectors: list[DetectorScore] = field(default_factory=list)
     contextual_counts: dict[str, int] = field(default_factory=dict)
+    unexercised: dict[str, str] = field(default_factory=dict)
     latency_ms: dict[str, float] = field(default_factory=dict)
     cost: dict[str, object] = field(default_factory=dict)
     xsd: dict[str, object] = field(default_factory=dict)
@@ -290,14 +292,57 @@ def _tier2_status(models: list[str]) -> dict[str, object]:
     return {
         "ran": False,
         "reason": (
-            "credentials are present but the corpus contains no PDF-only "
-            "invoices; generate them with synth/render_pdf.py first"
+            "credentials are present, but the corpus is XML only. The vision "
+            "path needs PDF or image invoices, which this generator does not "
+            "produce yet"
         ),
         "requested_models": models,
     }
 
 
 # --------------------------------------------------------------------------
+
+
+def _unexercised(labels: list[dict]) -> dict[str, str]:
+    """Detectors the corpus gave no opportunity to fire, and why.
+
+    A zero in a results table reads as "this ran and found nothing". For a
+    detector that was never reachable it means something else entirely, and the
+    difference is exactly what hid detector 2 for a week.
+    """
+    from cfdi_agent.config import get_config
+    from cfdi_agent.db.conn import fetch_one
+
+    out: dict[str, str] = {}
+    injected = {d for lb in labels for d in lb["defects"]}
+
+    # Ask the ledger, not the configuration. EMBED_BASE_URL can point at a host
+    # that is simply not running, which the config cannot know and which looks
+    # identical to a detector that found nothing.
+    embedded = fetch_one(
+        "SELECT count(*) AS n FROM line_items WHERE embedding IS NOT NULL"
+    )["n"]
+    if embedded == 0:
+        configured = get_config().embed_base_url or "(unset)"
+        out["semantic_duplicate"] = (
+            f"no line item was embedded, so the vector stage never ran; "
+            f"EMBED_BASE_URL is {configured}"
+        )
+    elif "semantic_dup" not in injected:
+        out["semantic_duplicate"] = "no semantic duplicates injected at this seed"
+
+    if fetch_one("SELECT count(*) AS n FROM anomalies WHERE kind = 'stale_stamp'")["n"] == 0:
+        out["stale_stamp"] = (
+            "the generator stamps every invoice within 4 hours, so no invoice "
+            "exceeds the 72-hour limit"
+        )
+    if fetch_one(
+        "SELECT count(*) AS n FROM anomalies WHERE kind = 'unknown_catalog_code'"
+    )["n"] == 0:
+        out["unknown_catalog_code"] = (
+            "the generator only emits catalog codes that are in the bundled subset"
+        )
+    return out
 
 
 def run(n: int, seed: int, defect_rate: float, models: list[str]) -> EvalReport:
@@ -320,6 +365,8 @@ def run(n: int, seed: int, defect_rate: float, models: list[str]) -> EvalReport:
     detectors, contextual = _score_detectors(labels)
     latency, cost = _score_runs()
 
+    unexercised = _unexercised(labels)
+
     return EvalReport(
         generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
         corpus_size=len(labels),
@@ -334,6 +381,7 @@ def run(n: int, seed: int, defect_rate: float, models: list[str]) -> EvalReport:
         cost=cost,
         xsd=_score_xsd(corpus_dir, labels),
         tier2=_tier2_status(models),
+        unexercised=unexercised,
     )
 
 

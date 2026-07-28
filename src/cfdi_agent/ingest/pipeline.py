@@ -21,6 +21,7 @@ from psycopg import Connection
 
 from cfdi_agent.config import get_config
 from cfdi_agent.db import repo
+from cfdi_agent.enrich.anomalies import run_vector_stage
 from cfdi_agent.extract.router import UnroutableDocument, route_document
 from cfdi_agent.ingest.dedupe import sha256_bytes
 from cfdi_agent.validate.rules import Anomaly, validate_invoice
@@ -36,6 +37,7 @@ KIND_LABELS = {
     "price_outlier": "precio fuera de rango",
     "new_supplier": "proveedor nuevo",
     "folio_gap": "salto de folio",
+    "semantic_duplicate": "posible factura duplicada",
     "stale_stamp": "timbrado fuera de plazo",
     "unknown_catalog_code": "código de catálogo desconocido",
 }
@@ -179,8 +181,25 @@ def ingest_bytes(
         ok=True,
     )
 
+    anomalies = result.anomalies
+
+    # The vector stage runs last: a semantic duplicate is found by comparing
+    # against the ledger, so this invoice has to be in it first. It needs an
+    # embedding backend, and not having one is a normal state — the rest of the
+    # pipeline is deterministic. When it is skipped, the reason is recorded
+    # rather than left to look like a clean result.
+    if persisted.invoice_id is not None:
+        # `skipped` is returned rather than logged per document: the breaker
+        # in run_vector_stage means it is the same reason every time, and a
+        # row per invoice would break the one-row-per-document invariant
+        # that cost per invoice is computed from.
+        extra, _skipped = run_vector_stage(conn, persisted.invoice_id)
+        if extra:
+            repo.record_anomalies(conn, persisted.invoice_id, extra)
+            anomalies = anomalies + tuple(extra)
+
     summary = (
-        _summarize(inv, result.anomalies)
+        _summarize(inv, anomalies)
         if result.accepted
         else f"Rechazada: {result.reject_reason}"
     )
@@ -197,7 +216,7 @@ def ingest_bytes(
         uuid=persisted.uuid,
         invoice_id=persisted.invoice_id,
         summary=summary,
-        anomalies=_anomaly_payload(result.anomalies),
+        anomalies=_anomaly_payload(anomalies),
     )
 
 

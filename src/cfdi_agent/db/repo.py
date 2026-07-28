@@ -16,6 +16,7 @@ later outlier verdict depends on.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
@@ -231,6 +232,20 @@ def _insert_anomalies(cur, invoice_id: int | None, anomalies: tuple[Anomaly, ...
             """,
             (invoice_id, a.kind, a.severity, Jsonb(a.detail), Jsonb(a.evidence)),
         )
+
+
+def record_anomalies(
+    conn: Connection[Any], invoice_id: int, anomalies: Sequence[Anomaly]
+) -> None:
+    """Attach findings to an invoice after it was persisted.
+
+    The vector stage runs after the row exists, because a semantic duplicate is
+    found by comparing against the ledger — including, now, this invoice.
+    """
+    if not anomalies:
+        return
+    with conn.cursor() as cur:
+        _insert_anomalies(cur, invoice_id, tuple(anomalies))
 
 
 def persist_invoice(

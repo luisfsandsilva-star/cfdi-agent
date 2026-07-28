@@ -42,7 +42,7 @@ The command `python -m evals.run_eval` calculates these numbers. The test uses
 can calculate the numbers again with one command. This section contains no
 estimates.
 
-**Field accuracy, layer 0.** The parser is correct for 287 of 287 invoices for
+**Field accuracy, layer 0.** The parser is correct for 286 of 286 invoices for
 each of these fields: `uuid`, `rfc_emisor`, `rfc_receptor`, `subtotal`,
 `total`, `moneda` and `n_conceptos`. This is 100%.
 
@@ -50,25 +50,35 @@ each of these fields: `uuid`, `rfc_emisor`, `rfc_receptor`, `subtotal`,
 
 | Defect | Injected | Recall | Precision | F1 |
 |---|---:|---:|---:|---:|
-| `bad_rfc` | 16 | 1.00 | 1.00 | 1.00 |
-| `dup_uuid` | 13 | 1.00 | 1.00 | 1.00 |
-| `line_math` | 12 | 1.00 | 1.00 | 1.00 |
-| `price_spike` | 9 | 1.00 | 1.00 | 1.00 |
-| `total_mismatch` | 11 | 1.00 | 1.00 | 1.00 |
-| `folio_gap` | 12 | 1.00 | **0.48** | 0.65 |
+| `bad_rfc` | 10 | 1.00 | 1.00 | 1.00 |
+| `dup_uuid` | 14 | 1.00 | 1.00 | 1.00 |
+| `folio_gap` | 12 | 1.00 | 0.60 | 0.75 |
+| `line_math` | 4 | 1.00 | 1.00 | 1.00 |
+| `price_spike` | 10 | 0.90 | 1.00 | 0.95 |
+| `semantic_dup` | 15 | 0.00 | — | — |
+| `total_mismatch` | 6 | 1.00 | 1.00 | 1.00 |
 
-**Speed.** The software processes 33 documents each second. The p50 latency is
-15 ms. The p95 latency is 21 ms.
+**Speed.** The software processes 21 documents each second. The p50 latency is
+15 ms. The p95 latency is 22 ms.
 
 **Cost.** The XML path costs $0.00 for each invoice, because it uses no model.
 
-**Schema.** 284 of 300 invoices are valid against the official SAT schema. The
-16 invalid invoices are the invoices with an incorrect RFC. The test corpus
+**Schema.** 290 of 300 invoices are valid against the official SAT schema. The
+10 invalid invoices are the invoices with an incorrect RFC. The test corpus
 makes these RFC values incorrect on purpose.
+
+`semantic_dup` shows recall 0.00 because the vector stage never ran: this
+machine has no embedding backend, so no line item was embedded. The report says
+so in its own section rather than letting the zero stand as a result. Detector 2
+is tested against a stub embedder; its recall on reworded text is unmeasured.
+
+`price_spike` shows 0.90: one injected spike out of ten was on a product whose
+price history was one invoice short of the five-sample floor the detector needs.
+The detector declined to judge, which is the designed behaviour.
 
 ### About the folio_gap detector
 
-The `folio_gap` detector has the lowest precision. This README shows the
+The `folio_gap` detector has the lowest precision (0.60). This README shows the
 number. It does not hide it.
 
 Each false positive comes from an invoice with an incorrect issuer RFC. The
@@ -79,7 +89,7 @@ number is higher than in production.
 
 ### About schema validation
 
-The XSD validation finds only one of the six defect types. Duplicate invoices,
+The XSD validation finds only one of the seven defect types. Duplicate invoices,
 high prices and incorrect totals are all valid against the schema.
 
 A valid schema does not tell you if you must pay an invoice. This is the reason
@@ -116,6 +126,8 @@ This table supplies the data for the evaluation report and the cost report.
 
 ## Detectors
 
+Nine detectors produce eleven kinds of finding.
+
 | # | Detector | Method | Severity |
 |---|---|---|---|
 | 1 | `duplicate_uuid` | Find the UUID in the database. The UNIQUE constraint gives a second check. | critical |
@@ -126,6 +138,7 @@ This table supplies the data for the evaluation report and the cost report.
 | 6 | `new_supplier` | Report the first invoice from an RFC. | info |
 | 7 | `folio_gap` | Find a gap in the folio sequence for each issuer and series. | warn |
 | 8 | `stale_stamp` | Report a stamp more than 72 hours after the issue date. | warn |
+| 9 | `unknown_catalog_code` | Report a SAT code outside the bundled catalog subset. | info |
 
 Each detector writes an `evidence` field in JSONB. This field contains the
 values that caused the detector to report. The language model can summarize
@@ -264,8 +277,12 @@ entities.
 - **The software does not verify the digital signature.** The `Sello`,
   `Certificado` and `SelloSAT` fields are present but the software does not
   check them. This check needs the certificate chain of the PAC.
-- **The SAT status check uses a simulation.** A flag enables the connection to
-  the `ConsultaCFDIService` web service.
+- **There is no SAT status check.** The `invoices.sat_status` column exists and
+  always holds NULL. Asking the SAT whether a UUID is still valid needs the
+  `ConsultaCFDIService` web service, and that is not implemented.
+- **Detector 2 needs an embedding backend.** Without `EMBED_BASE_URL` the vector
+  stage is skipped and the reason is written to `extraction_runs`. Its recall on
+  reworded text is unmeasured, because that measurement needs a model running.
 - **The SAT catalogs are incomplete.** The `c_ClaveProdServ` catalog contains
   approximately 52,000 rows. This repository contains a subset. An unknown code
   gives an `info` message. It does not cause a rejection.

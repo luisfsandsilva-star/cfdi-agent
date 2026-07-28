@@ -1,17 +1,17 @@
 # Eval report
 
-Generated 2026-07-28T21:01:56+00:00 · corpus 300 · seed 1312 · defect rate 25%
+Generated 2026-07-28T21:38:55+00:00 · corpus 300 · seed 1312 · defect rate 25%
 
 Every figure below is produced by `python -m evals.run_eval` against a dedicated `cfdi_eval` database. Nothing here is estimated.
 
 ## Ingest
 
-300 documents in 8.89s (34/s)
+300 documents in 14.06s (21/s)
 
 | status | n |
 |---|---:|
-| `ok` | 210 |
-| `anomaly` | 90 |
+| `ok` | 231 |
+| `anomaly` | 69 |
 
 ## Field accuracy — tier 0 (deterministic XML)
 
@@ -19,13 +19,13 @@ Exact match against the generator's ground truth, read back out of Postgres. Dup
 
 | field | correct | total | accuracy |
 |---|---:|---:|---:|
-| `uuid` | 287 | 287 | 100.0% |
-| `rfc_emisor` | 287 | 287 | 100.0% |
-| `rfc_receptor` | 287 | 287 | 100.0% |
-| `subtotal` | 287 | 287 | 100.0% |
-| `total` | 287 | 287 | 100.0% |
-| `moneda` | 287 | 287 | 100.0% |
-| `n_conceptos` | 287 | 287 | 100.0% |
+| `uuid` | 286 | 286 | 100.0% |
+| `rfc_emisor` | 286 | 286 | 100.0% |
+| `rfc_receptor` | 286 | 286 | 100.0% |
+| `subtotal` | 286 | 286 | 100.0% |
+| `total` | 286 | 286 | 100.0% |
+| `moneda` | 286 | 286 | 100.0% |
+| `n_conceptos` | 286 | 286 | 100.0% |
 
 ## Anomaly detectors
 
@@ -33,12 +33,13 @@ Scored against injected defects. A firing counts as a false positive only on an 
 
 | defect | injected | caught | recall | fired | FP | precision | F1 |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `bad_rfc` | 16 | 16 | 1.00 | 16 | 0 | 1.00 | 1.00 |
-| `dup_uuid` | 13 | 13 | 1.00 | 13 | 0 | 1.00 | 1.00 |
-| `folio_gap` | 12 | 12 | 1.00 | 36 | 13 | 0.48 | 0.65 |
-| `line_math` | 12 | 12 | 1.00 | 23 | 0 | 1.00 | 1.00 |
-| `price_spike` | 9 | 9 | 1.00 | 9 | 0 | 1.00 | 1.00 |
-| `total_mismatch` | 11 | 11 | 1.00 | 11 | 0 | 1.00 | 1.00 |
+| `bad_rfc` | 10 | 10 | 1.00 | 10 | 0 | 1.00 | 1.00 |
+| `dup_uuid` | 14 | 14 | 1.00 | 14 | 0 | 1.00 | 1.00 |
+| `folio_gap` | 12 | 12 | 1.00 | 27 | 8 | 0.60 | 0.75 |
+| `line_math` | 4 | 4 | 1.00 | 10 | 0 | 1.00 | 1.00 |
+| `price_spike` | 10 | 9 | 0.90 | 9 | 0 | 1.00 | 0.95 |
+| `semantic_dup` | 15 | 0 | 0.00 | 0 | 0 | — | — |
+| `total_mismatch` | 6 | 6 | 1.00 | 6 | 0 | 1.00 | 1.00 |
 
 ### Contextual detectors
 
@@ -49,6 +50,16 @@ These describe an invoice rather than accuse it, so they have no injected ground
 | `new_supplier` | 10 |
 | `stale_stamp` | 0 |
 | `unknown_catalog_code` | 0 |
+
+### Detectors with no opportunity to fire
+
+These did not report, and that is not the same as reporting nothing. The corpus or the configuration gave them no case to react to.
+
+| detector | why |
+|---|---|
+| `semantic_duplicate` | no line item was embedded, so the vector stage never ran; EMBED_BASE_URL is http://orin.local:8082/v1 |
+| `stale_stamp` | the generator stamps every invoice within 4 hours, so no invoice exceeds the 72-hour limit |
+| `unknown_catalog_code` | the generator only emits catalog codes that are in the bundled subset |
 
 ## Latency
 
@@ -70,9 +81,9 @@ The denominator is every document, not only the ones that reached a model. An XM
 
 ## XSD conformance
 
-284/300 validate against the SAT's official CFDI 4.0 schema chain.
+290/300 validate against the SAT's official CFDI 4.0 schema chain.
 
-Every invalid document is one of the 16 deliberately malformed RFCs. **Of six injected defect kinds, the schema catches one** — duplicates, inflated prices and totals that do not add up are all perfectly schema-valid. Schema conformance says nothing about whether an invoice should be paid.
+Every invalid document is one of the 10 deliberately malformed RFCs. **Of six injected defect kinds, the schema catches one** — duplicates, inflated prices and totals that do not add up are all perfectly schema-valid. Schema conformance says nothing about whether an invoice should be paid.
 
 ## Tier 2 — vision path
 

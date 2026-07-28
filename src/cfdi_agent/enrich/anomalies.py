@@ -154,3 +154,87 @@ def detect_semantic_duplicate(
             ],
         },
     )
+
+
+# Set once the shared embedding backend has failed, so a batch of 300 invoices
+# does not wait on the same dead host 300 times. Ingesting the corpus with
+# EMBED_BASE_URL pointing at an offline machine went from 9 seconds to
+# unbounded before this existed.
+_BACKEND_DOWN: str | None = None
+
+
+def reset_backend_state() -> None:
+    """Forget a previous failure. For tests and long-lived processes."""
+    global _BACKEND_DOWN
+    _BACKEND_DOWN = None
+
+
+def run_vector_stage(
+    conn: Connection[Any], invoice_id: int, *, provider: Any = None
+) -> tuple[list[Anomaly], str | None]:
+    """Embed this invoice's line items, then look for a semantic duplicate.
+
+    Runs *after* the invoice is persisted, because the comparison is against
+    the ledger and the embeddings have to exist before the vector search can
+    use them.
+
+    Returns the findings and, when the stage could not run, the reason. A
+    missing embedding backend is a normal operating state, not an error: the
+    rest of the pipeline is deterministic and does not need one. Reporting the
+    reason keeps that visible instead of letting the detector look silently
+    healthy — which is exactly how this detector spent its first week, wired to
+    nothing and documented as working.
+    """
+    from cfdi_agent.extract.providers.base import ProviderError
+
+    global _BACKEND_DOWN
+    if provider is None and _BACKEND_DOWN is not None:
+        return [], _BACKEND_DOWN
+
+    try:
+        if provider is None:
+            from cfdi_agent.enrich.embeddings import embedding_provider
+
+            provider = embedding_provider()
+        embed_invoice(conn, invoice_id, provider)
+    except ProviderError as exc:
+        # Trip the breaker only for the shared backend. An injected provider is
+        # the caller's business and must not poison the process.
+        if provider is None or getattr(provider, "name", None) == "local":
+            _BACKEND_DOWN = str(exc)
+        return [], str(exc)
+
+    anomaly = detect_semantic_duplicate(conn, invoice_id)
+    return ([anomaly] if anomaly else []), None
+
+
+def embed_invoice(conn: Connection[Any], invoice_id: int, provider: Any) -> int:
+    """Fill in the embeddings for one invoice's line items."""
+    from cfdi_agent.config import get_config
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, descripcion FROM line_items "
+            "WHERE invoice_id = %s AND embedding IS NULL ORDER BY line_no",
+            (invoice_id,),
+        )
+        rows = cur.fetchall()
+    if not rows:
+        return 0
+
+    vectors = provider.embed([r["descripcion"] for r in rows])
+    expected = get_config().embed_dim
+    for row, vector in zip(rows, vectors, strict=True):
+        if len(vector) != expected:
+            from cfdi_agent.extract.providers.base import ProviderError
+
+            raise ProviderError(
+                f"embedding model returned {len(vector)} dims, schema expects "
+                f"{expected}. Check EMBED_MODEL / EMBED_DIM."
+            )
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE line_items SET embedding = %s WHERE id = %s",
+                (str(vector), row["id"]),
+            )
+    return len(rows)
