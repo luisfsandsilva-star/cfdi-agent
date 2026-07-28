@@ -144,12 +144,22 @@ python -m cfdi_agent.agent.loop -v \
   "¿Cuánto gasté con ACME en Q2 y hubo algo raro?"
 ```
 
-Correr contra un modelo local — sin cambios de código:
+Correr la extracción contra un modelo local — sin cambios de código:
 
 ```bash
 LLM_PROVIDER=local LLM_BASE_URL=http://orin.local:8080/v1 \
   python -m evals.run_eval
 ```
+
+**Hasta dónde llega la costura.** Esa variable controla únicamente la ruta de
+extracción de documentos. Los embeddings siempre corren local, porque la API de
+Anthropic no los sirve. **El agente de lenguaje natural siempre usa la API.**
+
+La razón es concreta: el agente usa el tool runner del SDK de Anthropic, y un
+servidor con API compatible OpenAI no lo tiene — expone un parámetro `tools` en
+`/chat/completions`, pero el loop de llamadas hay que escribirlo. Mandar el
+agente a un modelo local significa implementar ese loop en `openai_compat.py` y
+hacer que `agent/loop.py` pase por `get_provider()`.
 
 ---
 
@@ -228,6 +238,9 @@ corta y honesta.
   SAT recupera parte —el último carácter solo puede ser `[0-9A]`— pero el
   algoritmo completo no está implementado, porque equivocarlo rechazaría
   contribuyentes válidos.
+- **La costura de proveedores no cubre al agente.** `LLM_PROVIDER` mueve la
+  extracción de documentos a un modelo local. El agente de lenguaje natural
+  siempre usa la API. La razón está en la sección de arranque.
 - **El tier 2 está sin medir.** La ruta de visión y la comparación API vs local
   necesitan credenciales; `evals/report.md` lo dice en vez de dejar un blanco.
 

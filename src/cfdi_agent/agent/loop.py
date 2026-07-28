@@ -9,6 +9,13 @@ supplier's line items, then whether anything was flagged — and each step's
 query depends on the previous answer. The SDK's tool runner drives that;
 `tools.py` decides what is reachable.
 
+This module is coupled to the Anthropic SDK and does not go through
+`extract.providers.get_provider`. The SDK's tool runner has no equivalent on an
+OpenAI-compatible server, which exposes a `tools` parameter and leaves the
+caller to drive the loop. So `LLM_PROVIDER=local` does not move the agent; it
+moves document extraction and nothing else. Writing that loop in
+`openai_compat.py` is what would close the gap.
+
 Two things the system prompt cannot be relied upon for, so they are structural:
 
 *Injection.* Line-item descriptions are written by suppliers and land in the

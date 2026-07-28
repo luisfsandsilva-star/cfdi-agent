@@ -5,10 +5,18 @@ build than two implementations and produces something neither gives you alone:
 a measured answer to "which routes actually need a frontier model?".
 
 Concretely, this is what makes the AGX Orin a configuration change rather than
-a rewrite. Nothing above this module knows whether a call went to Anthropic or
-to a llama.cpp server:
+a rewrite for the extraction path:
 
     LLM_PROVIDER=local LLM_BASE_URL=http://orin.local:8080/v1
+
+Where the seam does *not* reach, stated plainly because the README used to
+overclaim it: `agent/loop.py` imports the Anthropic SDK directly and is not
+routed through `get_provider`. It uses the SDK's tool runner, and an
+OpenAI-compatible server has no equivalent — that server exposes a `tools`
+parameter on `/chat/completions` and leaves the caller to drive the loop.
+Sending the agent to a local model means writing that loop in
+`openai_compat.py` first. Until then the seam covers document extraction and
+embeddings only.
 
 Every call returns an `LLMResult` carrying latency, tokens and cost, which the
 caller writes to `extraction_runs`. Usage accounting is not optional bookkeeping

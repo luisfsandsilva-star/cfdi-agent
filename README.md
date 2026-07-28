@@ -168,12 +168,23 @@ python -m cfdi_agent.agent.loop -v \
   "¿Cuánto gasté con ACME en Q2 y hubo algo raro?"
 ```
 
-Use a local model. You do not change the code:
+Use a local model for extraction. You do not change the code:
 
 ```bash
 LLM_PROVIDER=local LLM_BASE_URL=http://orin.local:8080/v1 \
   python -m evals.run_eval
 ```
+
+**Limit of the provider interface.** This setting controls the document
+extraction path only. The embeddings always run on a local model, because the
+Anthropic API does not supply embeddings. The natural-language agent always
+uses the Anthropic API.
+
+The agent uses the tool-runner function of the Anthropic SDK. A server with an
+OpenAI-compatible API does not have this function. That server supplies a
+`tools` parameter on the `/chat/completions` endpoint, but the software must
+then control the tool loop. To send the agent to a local model, add this loop
+to `openai_compat.py` and change `agent/loop.py` to call `get_provider()`.
 
 ---
 
@@ -262,6 +273,10 @@ entities.
   SAT schema gives part of this check: the last character can only be a digit or
   the letter `A`. The full algorithm is not implemented. An incorrect
   implementation rejects correct taxpayers.
+- **The provider interface does not cover the agent.** The
+  `LLM_PROVIDER` setting moves document extraction to a local model. The
+  natural-language agent always uses the Anthropic API. The section "How to
+  start" gives the reason.
 - **Layer 2 has no measurements.** The vision path and the comparison between
   the API and a local model need credentials. The file `evals/report.md` shows
   this status.
