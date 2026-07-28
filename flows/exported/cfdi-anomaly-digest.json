@@ -1,0 +1,118 @@
+{
+  "connections": {
+    "Anomalías abiertas": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Formatear digest",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Cada mañana 09:00": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Anomalías abiertas",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Formatear digest": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Publicar digest",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "name": "cfdi-anomaly-digest",
+  "nodes": [
+    {
+      "id": "2bd2ad32-bbb3-5dda-885d-3d29cf42dc05",
+      "name": "Anomalías abiertas",
+      "parameters": {
+        "method": "GET",
+        "options": {},
+        "url": "http://host.docker.internal:8000/anomalies/open"
+      },
+      "position": [
+        260,
+        0
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "id": "d4ee2439-ff59-578f-ad16-9867be853ff3",
+      "name": "Cada mañana 09:00",
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "0 9 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      },
+      "position": [
+        0,
+        0
+      ],
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3
+    },
+    {
+      "id": "340a0c0a-042f-5782-abe7-4772dcef3755",
+      "name": "Formatear digest",
+      "parameters": {
+        "jsCode": "const payload = $input.first().json;\nconst rows = payload.anomalies || [];\nconst icon = { critical: '🔴', warn: '🟡', info: '🔵' };\n\nif (rows.length === 0) {\n  return [{ json: { text: '✅ Sin anomalías abiertas.' } }];\n}\n\nconst bySeverity = {};\nfor (const r of rows) (bySeverity[r.severity] ||= []).push(r);\n\nconst lines = [`*Anomalías abiertas: ${payload.count}*`];\nfor (const sev of ['critical', 'warn', 'info']) {\n  for (const r of bySeverity[sev] || []) {\n    lines.push(`${icon[sev]} ${r.kind} · ${r.rfc_emisor} · ${r.total} · ${r.invoice_uuid}`);\n  }\n}\nreturn [{ json: { text: lines.join('\\n') } }];"
+      },
+      "position": [
+        520,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "credentials": {
+        "slackApi": {
+          "name": "Slack account"
+        }
+      },
+      "id": "2a5bfc69-fc92-5508-a85c-62ad0b7e943f",
+      "name": "Publicar digest",
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#facturacion"
+        },
+        "operation": "post",
+        "otherOptions": {},
+        "resource": "message",
+        "select": "channel",
+        "text": "={{ $json.text }}"
+      },
+      "position": [
+        780,
+        0
+      ],
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

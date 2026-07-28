@@ -1,0 +1,164 @@
+{
+  "connections": {
+    "Factura recibida": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Ingestar CFDI",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Ingestar CFDI": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "¿Hay anomalía?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "¿Hay anomalía?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Avisar en Slack",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Sin hallazgos",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "name": "cfdi-invoice-intake",
+  "nodes": [
+    {
+      "credentials": {
+        "slackApi": {
+          "name": "Slack account"
+        }
+      },
+      "id": "df48baf4-a9f5-5396-96e5-57fa22294286",
+      "name": "Avisar en Slack",
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#facturacion"
+        },
+        "operation": "post",
+        "otherOptions": {},
+        "resource": "message",
+        "select": "channel",
+        "text": "={{ $json.summary }}\nUUID: {{ $json.uuid }} · hallazgos: {{ $json.anomalies.map(a => a.label).join(', ') }}"
+      },
+      "position": [
+        780,
+        -80
+      ],
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5
+    },
+    {
+      "id": "4c1be0f9-570f-5a9b-aa7b-7e7aa64b799f",
+      "name": "Factura recibida",
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "cfdi",
+        "responseMode": "lastNode"
+      },
+      "position": [
+        0,
+        0
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1
+    },
+    {
+      "id": "5a71321d-6d9e-5f3c-9071-06bb9038df15",
+      "name": "Ingestar CFDI",
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "inputDataFieldName": "data",
+              "name": "file",
+              "parameterType": "formBinaryData"
+            }
+          ]
+        },
+        "contentType": "multipart-form-data",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "url": "http://host.docker.internal:8000/ingest"
+      },
+      "position": [
+        260,
+        0
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "id": "62b765de-829c-536a-a171-7896e266e57b",
+      "name": "Sin hallazgos",
+      "parameters": {},
+      "position": [
+        780,
+        80
+      ],
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1
+    },
+    {
+      "id": "8d2b35af-a25c-5733-831f-dac7acfe5404",
+      "name": "¿Hay anomalía?",
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b0e55f7a-7aaf-574e-9a79-ee624cdab78b",
+              "leftValue": "={{ $json.status }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "anomaly"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      },
+      "position": [
+        520,
+        0
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
