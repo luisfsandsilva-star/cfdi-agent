@@ -444,7 +444,13 @@ def generate(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--n", type=int, default=60, help="number of invoices")
+    # 300 rather than a token 60: the price-outlier detector needs 5 prior
+    # invoices for the same (supplier, product) before a spike is even
+    # injectable, and a 60-invoice corpus spread over 8 suppliers never gets
+    # there — the generator honestly reports "price_spike never injected" and
+    # the detector goes completely unexercised. A default that silently skips
+    # a detector is a footgun; generation still takes under two seconds.
+    ap.add_argument("--n", type=int, default=300, help="number of invoices")
     ap.add_argument("--defect-rate", type=float, default=0.25)
     ap.add_argument("--out", type=Path, default=Path("data/synth"))
     ap.add_argument("--labels", type=Path, default=Path("evals/datasets/labeled.jsonl"))
