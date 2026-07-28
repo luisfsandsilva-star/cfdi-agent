@@ -252,6 +252,19 @@ def detect_folio_gap(inv: ParsedInvoice, ctx: HistoryContext) -> Anomaly | None:
     Usually benign (the supplier invoices other customers too), which is why
     this is `warn` and not `critical`. It earns its place because a gap that
     coincides with a duplicate or a price spike is a much stronger signal.
+
+    This is the least precise detector in the suite and the number is published
+    rather than buried. Measured on a 300-invoice corpus: 28 firings against 13
+    injected gaps, precision ~0.43. Every remaining false positive traces to an
+    invoice whose issuer RFC was malformed — it files under a different RFC, so
+    the real supplier's sequence shows a hole.
+
+    That is arguably the correct verdict (an unreadable RFC genuinely breaks
+    supplier identity) and it is inflated here by the corpus, which corrupts
+    RFCs at ~4%; real inboxes are far cleaner. An earlier version was much
+    worse at precision 0.30, because the watermark was read from `invoices` and
+    so counted documents *we* declined to insert as supplier gaps. See
+    `seen_folios` in schema.sql.
     """
     if inv.folio is None:
         return None

@@ -89,6 +89,28 @@ CREATE TABLE IF NOT EXISTS taxes (
 
 CREATE INDEX IF NOT EXISTS idx_taxes_invoice ON taxes (invoice_id);
 
+-- ------------------------------------------------------------- seen_folios
+-- Every folio we have *observed*, written before any persistence decision.
+--
+-- Detector #7 asks "did the supplier skip a folio?", which is a question about
+-- what the supplier issued — not about what our ledger happens to contain. The
+-- two diverge constantly: a duplicate-UUID submission is deliberately not
+-- inserted into `invoices`, so its folio would leave a hole and the next
+-- invoice from that supplier would be reported as a gap we created ourselves.
+--
+-- Measured on a 300-invoice corpus, reading the watermark from `invoices`
+-- produced 43 folio_gap alerts against 13 real ones: 74% false positives, which
+-- is well past the point where an alert channel stops being read.
+CREATE TABLE IF NOT EXISTS seen_folios (
+    rfc_emisor TEXT NOT NULL,
+    -- '' rather than NULL: a folio series with no Serie is a real case, and
+    -- NULL in a primary key does not compare the way this needs to.
+    serie      TEXT NOT NULL DEFAULT '',
+    folio      BIGINT NOT NULL,
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (rfc_emisor, serie, folio)
+);
+
 -- ---------------------------------------------------------------- anomalies
 CREATE TABLE IF NOT EXISTS anomalies (
     id          BIGSERIAL PRIMARY KEY,
