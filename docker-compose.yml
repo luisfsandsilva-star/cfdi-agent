@@ -47,6 +47,31 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Embeddings for detector 2 (semantic duplicate). Opt-in, because the
+  # deterministic pipeline does not need it and the model is another ~1.2 GB:
+  #
+  #   docker compose --profile embeddings up -d
+  #   docker compose exec embeddings ollama pull bge-m3
+  #
+  # bge-m3 is multilingual, strong on Spanish, and returns 1024 dimensions,
+  # which is what `line_items.embedding` is declared as. A model with a
+  # different width fails loudly in `embed_invoice` rather than corrupting the
+  # index. Ollama speaks the OpenAI embeddings API, so no code changes.
+  #
+  # CPU is enough. Embedding a line-item description is milliseconds; this does
+  # not need the Orin, and running it here is what makes detector 2 measurable
+  # without any other hardware.
+  embeddings:
+    image: ollama/ollama
+    container_name: cfdi-ollama
+    profiles: ["embeddings"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
 volumes:
   pgdata:
   n8ndata:
+  ollama:

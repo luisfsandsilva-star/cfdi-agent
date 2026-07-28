@@ -140,6 +140,10 @@ class Supplier:
     invoices_emitted: int = 0
     # (product, quantity) of the most recent invoice, so a semantic duplicate
     # can re-bill exactly the same work under different wording.
+    # (clave_prod_serv, cantidad, valor_unitario) of the most recent invoice.
+    # A re-bill has to reproduce the price too, not just the quantity: letting
+    # the price drift moves the total outside the detector's 1% window, which
+    # made 10 of 15 injected duplicates structurally undetectable.
     last_lines: list = field(default_factory=list)
     # (rfc_as_written, clave_prod_serv) -> prior invoices carrying that product.
     #
@@ -214,7 +218,7 @@ def _render_invoice(
     twin = getattr(supplier, "last_lines", None)
     if "semantic_dup" in defects:
         if twin:
-            keys = {k for k, _ in twin}
+            keys = {k for k, _, _ in twin}
             chosen = [p for p in supplier.products if p.clave_prod_serv in keys]
         else:
             defects = [d for d in defects if d != "semantic_dup"]
@@ -253,19 +257,25 @@ def _render_invoice(
     math_line = rng.randrange(len(chosen)) if "line_math" in applied else -1
 
     # Keyed by ClaveProdServ: Product is a mutable dataclass and not hashable.
-    twin_qty = (
-        {k: q for k, q in twin} if ("semantic_dup" in applied and twin) else {}
+    twin_lines = (
+        {k: (q, u) for k, q, u in twin} if ("semantic_dup" in applied and twin) else {}
     )
 
     for idx, product in enumerate(chosen):
-        if product.clave_prod_serv in twin_qty:
-            cantidad = twin_qty[product.clave_prod_serv]
+        reuse = twin_lines.get(product.clave_prod_serv)
+        if reuse:
+            cantidad, forced_unit = reuse
         else:
-            cantidad = d(rng.randint(1, 12), Decimal("0.000001"))
-        unit = product.unit_price
-        # Normal drift so a real baseline has variance; the outlier detector
-        # must survive ordinary price movement without firing.
-        unit = d(unit * Decimal(str(rng.uniform(0.97, 1.03))), Decimal("0.000001"))
+            cantidad, forced_unit = d(rng.randint(1, 12), Decimal("0.000001")), None
+        if forced_unit is not None:
+            # A re-bill charges the same price. Any drift here would move the
+            # total out of the detector's window and make the defect unfindable.
+            unit = forced_unit
+        else:
+            unit = product.unit_price
+            # Normal drift so a real baseline has variance; the outlier detector
+            # must survive ordinary price movement without firing.
+            unit = d(unit * Decimal(str(rng.uniform(0.97, 1.03))), Decimal("0.000001"))
         if idx == spike_line:
             unit = d(unit * Decimal(str(rng.uniform(3.0, 5.0))), Decimal("0.000001"))
 
@@ -282,7 +292,7 @@ def _render_invoice(
             "importe": f"{d(base * IVA)}",
         }
         descripcion = product.descripcion
-        if "semantic_dup" in applied and twin_qty:
+        if "semantic_dup" in applied and twin_lines:
             descripcion = REWORDS.get(descripcion, descripcion)
 
         conceptos.append(
@@ -365,7 +375,7 @@ def _render_invoice(
     xml = env.get_template("cfdi40.xml.j2").render(**ctx)
     supplier.invoices_emitted += 1
     supplier.last_lines = [
-        (p.clave_prod_serv, Decimal(c["cantidad"]))
+        (p.clave_prod_serv, Decimal(c["cantidad"]), Decimal(c["valor_unitario"]))
         for p, c in zip(chosen, conceptos, strict=True)
     ]
 

@@ -36,10 +36,23 @@ from cfdi_agent.validate.rules import Anomaly
 # Same supplier, near-identical amount, close in time.
 TOTAL_TOLERANCE = Decimal("0.01")  # 1%
 DATE_WINDOW = timedelta(days=7)
-# Cosine similarity over line-item centroids. 0.93 is deliberately high: the
-# cost of a false accusation against a supplier is a phone call and lost trust
-# in the alert channel.
-SIMILARITY_THRESHOLD = 0.93
+# Cosine similarity over line-item centroids, measured rather than guessed.
+#
+# This was 0.93, picked from intuition, and it caught nothing: bge-m3 puts a
+# reworded line item between 0.715 and 0.910, so every real duplicate fell
+# under the bar. The stub embedder in the tests passed because it was built to
+# pass — a threshold is not tested by a fixture you designed around it.
+#
+# Measured on the product catalog (10 rewordings, 135 unrelated pairs):
+#
+#     same product, reworded    0.715 .. 0.910
+#     different products        0.253 .. 0.684
+#
+# 0.70 separates both sets completely. The margin is only 0.031, so on a wider
+# vocabulary the sets would likely overlap — this number is not load-bearing on
+# its own. The SQL pre-filter does the heavy lifting: same issuer, total within
+# 1%, date within 7 days. Cosine is the last confirmation, not the first cut.
+SIMILARITY_THRESHOLD = 0.70
 
 
 @dataclass(frozen=True, slots=True)

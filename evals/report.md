@@ -1,17 +1,17 @@
 # Eval report
 
-Generated 2026-07-28T21:38:55+00:00 · corpus 300 · seed 1312 · defect rate 25%
+Generated 2026-07-28T23:43:15+00:00 · corpus 300 · seed 1312 · defect rate 25%
 
 Every figure below is produced by `python -m evals.run_eval` against a dedicated `cfdi_eval` database. Nothing here is estimated.
 
 ## Ingest
 
-300 documents in 14.06s (21/s)
+300 documents in 166.16s (2/s)
 
 | status | n |
 |---|---:|
-| `ok` | 231 |
-| `anomaly` | 69 |
+| `ok` | 232 |
+| `anomaly` | 68 |
 
 ## Field accuracy — tier 0 (deterministic XML)
 
@@ -19,13 +19,13 @@ Exact match against the generator's ground truth, read back out of Postgres. Dup
 
 | field | correct | total | accuracy |
 |---|---:|---:|---:|
-| `uuid` | 286 | 286 | 100.0% |
-| `rfc_emisor` | 286 | 286 | 100.0% |
-| `rfc_receptor` | 286 | 286 | 100.0% |
-| `subtotal` | 286 | 286 | 100.0% |
-| `total` | 286 | 286 | 100.0% |
-| `moneda` | 286 | 286 | 100.0% |
-| `n_conceptos` | 286 | 286 | 100.0% |
+| `uuid` | 285 | 285 | 100.0% |
+| `rfc_emisor` | 285 | 285 | 100.0% |
+| `rfc_receptor` | 285 | 285 | 100.0% |
+| `subtotal` | 285 | 285 | 100.0% |
+| `total` | 285 | 285 | 100.0% |
+| `moneda` | 285 | 285 | 100.0% |
+| `n_conceptos` | 285 | 285 | 100.0% |
 
 ## Anomaly detectors
 
@@ -35,11 +35,11 @@ Scored against injected defects. A firing counts as a false positive only on an 
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `bad_rfc` | 10 | 10 | 1.00 | 10 | 0 | 1.00 | 1.00 |
 | `dup_uuid` | 14 | 14 | 1.00 | 14 | 0 | 1.00 | 1.00 |
-| `folio_gap` | 12 | 12 | 1.00 | 27 | 8 | 0.60 | 0.75 |
-| `line_math` | 4 | 4 | 1.00 | 10 | 0 | 1.00 | 1.00 |
-| `price_spike` | 10 | 9 | 0.90 | 9 | 0 | 1.00 | 0.95 |
-| `semantic_dup` | 15 | 0 | 0.00 | 0 | 0 | — | — |
-| `total_mismatch` | 6 | 6 | 1.00 | 6 | 0 | 1.00 | 1.00 |
+| `folio_gap` | 12 | 12 | 1.00 | 24 | 7 | 0.63 | 0.77 |
+| `line_math` | 4 | 4 | 1.00 | 12 | 0 | 1.00 | 1.00 |
+| `price_spike` | 6 | 5 | 0.83 | 7 | 0 | 1.00 | 0.91 |
+| `semantic_dup` | 14 | 14 | 1.00 | 20 | 6 | 0.70 | 0.82 |
+| `total_mismatch` | 8 | 8 | 1.00 | 8 | 0 | 1.00 | 1.00 |
 
 ### Contextual detectors
 
@@ -47,7 +47,7 @@ These describe an invoice rather than accuse it, so they have no injected ground
 
 | detector | invoices |
 |---|---:|
-| `new_supplier` | 10 |
+| `new_supplier` | 11 |
 | `stale_stamp` | 0 |
 | `unknown_catalog_code` | 0 |
 
@@ -57,7 +57,6 @@ These did not report, and that is not the same as reporting nothing. The corpus 
 
 | detector | why |
 |---|---|
-| `semantic_duplicate` | no line item was embedded, so the vector stage never ran; EMBED_BASE_URL is http://orin.local:8082/v1 |
 | `stale_stamp` | the generator stamps every invoice within 4 hours, so no invoice exceeds the 72-hour limit |
 | `unknown_catalog_code` | the generator only emits catalog codes that are in the bundled subset |
 
@@ -65,9 +64,9 @@ These did not report, and that is not the same as reporting nothing. The corpus 
 
 | percentile | ms |
 |---|---:|
-| p50 | 15 |
-| p95 | 22 |
-| max | 25 |
+| p50 | 9 |
+| p95 | 16 |
+| max | 29 |
 
 ## Cost
 

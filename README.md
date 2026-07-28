@@ -42,7 +42,7 @@ The command `python -m evals.run_eval` calculates these numbers. The test uses
 can calculate the numbers again with one command. This section contains no
 estimates.
 
-**Field accuracy, layer 0.** The parser is correct for 286 of 286 invoices for
+**Field accuracy, layer 0.** The parser is correct for 285 of 285 invoices for
 each of these fields: `uuid`, `rfc_emisor`, `rfc_receptor`, `subtotal`,
 `total`, `moneda` and `n_conceptos`. This is 100%.
 
@@ -52,14 +52,14 @@ each of these fields: `uuid`, `rfc_emisor`, `rfc_receptor`, `subtotal`,
 |---|---:|---:|---:|---:|
 | `bad_rfc` | 10 | 1.00 | 1.00 | 1.00 |
 | `dup_uuid` | 14 | 1.00 | 1.00 | 1.00 |
-| `folio_gap` | 12 | 1.00 | 0.60 | 0.75 |
+| `folio_gap` | 12 | 1.00 | 0.63 | 0.77 |
 | `line_math` | 4 | 1.00 | 1.00 | 1.00 |
-| `price_spike` | 10 | 0.90 | 1.00 | 0.95 |
-| `semantic_dup` | 15 | 0.00 | — | — |
-| `total_mismatch` | 6 | 1.00 | 1.00 | 1.00 |
+| `price_spike` | 6 | 0.83 | 1.00 | 0.91 |
+| `semantic_dup` | 14 | 1.00 | 0.70 | 0.82 |
+| `total_mismatch` | 8 | 1.00 | 1.00 | 1.00 |
 
-**Speed.** The software processes 21 documents each second. The p50 latency is
-15 ms. The p95 latency is 22 ms.
+**Speed.** The software processes 2 documents each second. The p50 latency is
+15 ms. The p95 latency is 16 ms.
 
 **Cost.** The XML path costs $0.00 for each invoice, because it uses no model.
 
@@ -67,18 +67,39 @@ each of these fields: `uuid`, `rfc_emisor`, `rfc_receptor`, `subtotal`,
 10 invalid invoices are the invoices with an incorrect RFC. The test corpus
 makes these RFC values incorrect on purpose.
 
-`semantic_dup` shows recall 0.00 because the vector stage never ran: this
-machine has no embedding backend, so no line item was embedded. The report says
-so in its own section rather than letting the zero stand as a result. Detector 2
-is tested against a stub embedder; its recall on reworded text is unmeasured.
+`semantic_dup` reads recall 1.00 and precision 0.70. Detector 2 now runs
+against bge-m3 rather than a stub, and the threshold it uses was measured, not
+assumed — see below.
 
-`price_spike` shows 0.90: one injected spike out of ten was on a product whose
-price history was one invoice short of the five-sample floor the detector needs.
-The detector declined to judge, which is the designed behaviour.
+The six apparent false positives were inspected: every one is a genuinely
+near-identical invoice, similarity 0.76 to 1.00, totals within 1%, zero to five
+days apart, one of them an exact 1.00 match. The generator produced real
+duplicates by accident and did not label them, so the ground truth is what is
+wrong here, not the detector. The number is published as measured rather than
+corrected by hand.
+
+### About the similarity threshold
+
+It was 0.93, chosen from intuition, and it caught nothing: bge-m3 places a
+reworded line item between 0.715 and 0.910. The stub embedder in the tests
+passed anyway, because a fixture built around a constant cannot validate that
+constant.
+
+Measured on the product catalog — 10 rewordings against 135 unrelated pairs:
+
+| set | range |
+|---|---|
+| same product, reworded | 0.715 – 0.910 |
+| different products | 0.253 – 0.684 |
+
+0.70 separates both sets completely, with a margin of 0.031. That margin is
+thin, so the cosine is not load-bearing alone: the SQL pre-filter does the first
+cut (same issuer, total within 1%, date within 7 days) and the similarity only
+confirms.
 
 ### About the folio_gap detector
 
-The `folio_gap` detector has the lowest precision (0.60). This README shows the
+The `folio_gap` detector has the lowest precision (0.63). This README shows the
 number. It does not hide it.
 
 Each false positive comes from an invoice with an incorrect issuer RFC. The
@@ -131,7 +152,7 @@ Nine detectors produce eleven kinds of finding.
 | # | Detector | Method | Severity |
 |---|---|---|---|
 | 1 | `duplicate_uuid` | Find the UUID in the database. The UNIQUE constraint gives a second check. | critical |
-| 2 | `semantic_duplicate` | Find an invoice with the same issuer, a total within 1%, and a date within 7 days. Then compare the line-item vectors. Report if the cosine value is more than 0.93. | critical |
+| 2 | `semantic_duplicate` | Find an invoice with the same issuer, a total within 1%, and a date within 7 days. Then compare the line-item vectors. Report if the cosine value is at least 0.70 (measured, not assumed). | critical |
 | 3 | `price_outlier` | Calculate a robust z-score with the MAD for each supplier and product. Apply a minimum MAD and a minimum difference. | warn |
 | 4 | `total_mismatch`, `subtotal_mismatch`, `line_math_mismatch` | Calculate the invoice totals again and compare. | critical |
 | 5 | `invalid_rfc` | Apply the RFC pattern from the SAT schema. | critical |

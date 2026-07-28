@@ -6,10 +6,12 @@ the plumbing and the thresholds: that the stage runs, that embeddings land in
 `line_items`, that the SQL window and the cosine cutoff behave, and that a
 missing backend degrades to a recorded reason rather than a silent zero.
 
-They do **not** verify that a real model puts "Servicio de limpieza de oficina"
-and "Limpieza de oficinas" close together. That needs bge-m3 actually running,
-and until it does, this detector's recall on reworded text is unmeasured. The
-eval report says so rather than showing a clean zero.
+They do **not** verify how close a real model puts "Servicio de limpieza de
+oficina" and "Limpieza de oficinas". That question was answered by measuring
+bge-m3 directly, and the answer moved the threshold from 0.93 to 0.70 — the
+original value caught nothing, while these same stub tests passed, because the
+stub was built to clear whatever bar was set. A fixture you design around a
+constant cannot validate that constant.
 """
 
 from __future__ import annotations
@@ -328,7 +330,7 @@ def test_the_finding_carries_verifiable_evidence() -> None:
 
     evidence = anomalies[0].evidence
     assert evidence["ventana_dias"] == 7
-    assert evidence["threshold"] == 0.93
+    assert evidence["threshold"] == 0.70
     match = evidence["coincidencias"][0]
     assert match["folio"] == "60"
     assert Decimal(match["total"]) == Decimal("1160.00")
