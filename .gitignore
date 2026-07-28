@@ -19,4 +19,9 @@ htmlcov/
 #   python -m synth.generate_cfdi --n 60 --seed 1312 --out data/synth
 data/
 evals/datasets/*.jsonl
-evals/report.md
+evals/report.json
+
+# evals/report.md IS committed, unlike the labels above. The difference is
+# whether staleness is visible: the report carries its own timestamp and seed
+# in the header, so an out-of-date one announces itself. A stale labels file is
+# consumed silently by the scorer and corrupts every number it produces.
