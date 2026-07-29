@@ -108,49 +108,75 @@ el valor que lo causó, y en una factura real ese valor es el RFC de alguien.
 a un modelo para leerse, y tier 2 significa la API de Anthropic: las facturas
 salen del edificio. Para eso existe la costura de tier 1.
 
-**Resultado sobre cuatro facturas reales de cuatro emisores distintos.** Las
-cuatro parsean. Las cuatro validan contra el XSD del SAT. Ningún detector
-dispara salvo `new_supplier`, que es correcto en un primer avistamiento. El
-parser no necesitó un solo cambio para leer documentos que no generó él.
+**Resultado sobre 95 facturas reales de 56 emisores distintos.** Las 95
+parsean. Las 95 validan contra la cadena XSD del SAT. Ninguna anomalía crítica
+sobrevive a la inspección.
+
+Llegar ahí necesitó tres correcciones, y las tres eran este software
+equivocándose sobre facturas correctas. Un CFDI timbrado es un prior fuerte:
+el PAC del emisor valida la aritmética antes de timbrar, así que una anomalía
+crítica de suma es primero evidencia contra el parser.
+
+*No se contaban los impuestos locales.* Dos facturas traen complemento
+`implocal` —impuestos estatales—. No están en `cfdi:Impuestos` porque no son
+federales, pero el emisor los cobra: el total esperado quedaba corto por
+exactamente `TotaldeTraslados`, 254.51 y 129.51, al centavo.
+
+*La tolerancia del subtotal no escalaba con el número de líneas.* Cada importe
+lo redondea el emisor a centavos, así que n líneas pueden desviarse medio
+centavo cada una. Una factura de 4 conceptos falló por 0.02.
+
+*La cadena de esquemas estaba incompleta.* Cuatro documentos salían inválidos y
+son válidos: `cfdi:Complemento` es un `xs:any processContents="strict"`, así que
+a un complemento nunca se llega siguiendo imports. `implocal` y `aerolineas` ya
+están vendorizados y la conformidad es 95/95.
+
+Dos facturas de 95 no traen serie ni folio, algo que el generador siempre
+escribe.
+
+`semantic_duplicate` dispara 3 veces, y se reportan como se midieron, no
+ajustadas. Cada una es el mismo emisor, descripción idéntica, total idéntico y
+redondo —400, 480 y 600— con días de diferencia. Una compra chica recurrente se
+ve igual que un doble cobro para una regla basada en emisor, monto y ventana de
+7 días. Si eso debe alertar es decisión del negocio, no un umbral que se ajusta
+a tres muestras sin ground truth.
 
 ## Visión, medida contra ground truth
 
 Cada factura real llega como PDF **y** como XML del mismo documento. El XML
-parsea de manera determinista, así que es ground truth: gratis, exacto, y no
-escrito por la misma mano que lo que se está calificando.
+parsea determinista: ground truth gratis, exacto, y no escrito por la misma
+mano que lo que se califica.
 
-```bash
-python -m evals.vision_accuracy data/real --provider local --model qwen2.5vl:3b
-```
+Lo primero que eso mide es si hace falta un modelo. Un CFDI en PDF lo genera el
+software de facturación e imprime directo a PDF: los caracteres ya están en el
+archivo, posicionados, nunca rasterizados.
 
-Cuatro facturas reales, `qwen2.5vl:3b` sobre una GTX 1660 Ti, 200 DPI:
+93 pares PDF/XML, campos presentes en el texto extraído:
 
-| campo | exactitud |
-|---|---:|
-| `uuid` | 50% |
-| `rfc_emisor` | 75% |
-| `rfc_receptor` | 25% |
-| `subtotal` | 25% |
-| `total` | 25% |
-| `moneda` | 50% |
-| `n_conceptos` | 50% |
+| campo | `PaddleOCR-VL-1.6` | **capa de texto** |
+|---|---:|---:|
+| `uuid` | 72% | **99%** |
+| `rfc_emisor` | 94% | **100%** |
+| `rfc_receptor` | 96% | **100%** |
+| `subtotal` | 86% | **100%** |
+| `total` | 74% | **100%** |
+| `line_amounts` | 80% | 94% |
+| **campos** | 466/558 · **83%** | 551/558 · **99%** |
+| latencia/factura | 10 s | **<0.1 s** |
 
-**Cero de cuatro facturas salieron completamente correctas. p50 de 68
-segundos.** Tier 0 lee esas mismas cuatro en 27 milisegundos sin paso de
-transcripción, así que no tiene este tipo de error que cometer.
+Leer la capa de texto no cuesta nada y no puede inventar un dígito, porque no
+hay transcripción que salga mal. Nadie revisó eso antes de bajar y medir dos
+modelos de visión. Es el mismo error del que trata la tesis del proyecto
+—recurrir a un modelo sobre datos que ya son estructurados— cometido un nivel
+más abajo, dentro de la ruta que existe para cuando falta la estructura.
 
-Cuatro facturas es una muestra chica y los porcentajes son gruesos. La
-conclusión no depende de la precisión: un modelo de visión de 3B sobre una
-factura mexicana real se equivoca en el total tres de cada cuatro veces, en
-todas las resoluciones entre 150 y 250 DPI.
+La ruta de visión se queda, porque fallan en documentos distintos. Una factura
+renderiza su bloque de timbre como imagen y deja las etiquetas como texto.
+`has_text_layer` es el switch, y un escaneo lo dispara honestamente al no dar
+casi caracteres.
 
-Esta es la tesis del proyecto, medida en vez de afirmada. Mandar a un modelo un
-documento que ya es dato estructurado cuesta dinero y **agrega un modo de falla
-por transcripción que antes no existía**. La ruta de visión es para cuando no
-llega XML, y esta tabla es su precio.
-
-Un modelo frontera lo haría bastante mejor. Esa comparación necesita API key y
-no se ha corrido, así que no se reporta aquí.
+Comparativa completa, incluidos los dos modelos descartados y por qué:
+[`evals/OCR_MODELS.md`](evals/OCR_MODELS.md).
 
 **De siete tipos de defecto inyectados, la validación XSD atrapa uno.**
 Duplicados, precios inflados y totales que no cuadran son todos perfectamente

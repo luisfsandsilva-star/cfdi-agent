@@ -39,6 +39,17 @@ DEFAULT_ROOTS = (
     "http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd",
     "http://www.sat.gob.mx/sitio_internet/cfd/3/cfdv33.xsd",
     "http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd",
+    # Complements found in a real 95-invoice batch. Neither is reachable by
+    # following imports from cfdv40.xsd, because cfdi:Complemento is an
+    # `xs:any processContents="strict"` — so without them the validator rejects
+    # perfectly valid invoices, and the report called four of them invalid when
+    # the gap was here.
+    #
+    # There are dozens of SAT complements and this is not an attempt to vendor
+    # them all. It is the two this corpus actually contains, added when the
+    # corpus asked for them, which is the same rule the catalog subset follows.
+    "http://www.sat.gob.mx/sitio_internet/cfd/implocal/implocal.xsd",
+    "http://www.sat.gob.mx/sitio_internet/cfd/aerolineas/aerolineas.xsd",
 )
 
 OUT_DIR = Path(__file__).resolve().parents[1] / "xsd"
@@ -154,6 +165,14 @@ WRAPPERS = {
         (
             "http://www.sat.gob.mx/TimbreFiscalDigital",
             "www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd",
+        ),
+        (
+            "http://www.sat.gob.mx/implocal",
+            "www.sat.gob.mx/sitio_internet/cfd/implocal/implocal.xsd",
+        ),
+        (
+            "http://www.sat.gob.mx/aerolineas",
+            "www.sat.gob.mx/sitio_internet/cfd/aerolineas/aerolineas.xsd",
         ),
     ),
     "cfdi33.xsd": (

@@ -49,6 +49,8 @@ import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+import httpx
+
 # The default is the docling task prompt. A document-parsing model is usually
 # trained on a small set of instructions and drifts badly outside them, so this
 # is a flag rather than a constant.
@@ -56,6 +58,21 @@ DEFAULT_PROMPT = "Convert this page to docling."
 CACHE_DIR = Path("data/.ocr_cache")
 
 NUMBER = re.compile(r"\d[\d,]*\.?\d*")
+
+
+class TranscriptionFailed(RuntimeError):
+    """One document did not come back. The other 92 still count."""
+
+
+def _error_message(response, limit: int = 200) -> str:
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text[:limit].strip()
+    error = body.get("error", body) if isinstance(body, dict) else body
+    if isinstance(error, dict):
+        error = error.get("message", error)
+    return str(error)[:limit].strip()
 FIELDS = ("uuid", "rfc_emisor", "rfc_receptor", "subtotal", "total", "line_amounts")
 
 
@@ -98,8 +115,6 @@ def transcribe(
     pdf: Path, *, model: str, prompt: str, base_url: str, dpi: int, timeout: float
 ) -> tuple[str, float]:
     """One page through the OCR model, cached by (model, prompt, file)."""
-    import httpx
-
     from cfdi_agent.extract.pdf_text import extract_text_layer
     from cfdi_agent.extract.providers.openai_compat import rasterize_pdf
 
@@ -139,8 +154,16 @@ def transcribe(
     }
     started = time.perf_counter()
     response = httpx.post(f"{base_url}/chat/completions", json=payload, timeout=timeout)
-    response.raise_for_status()
     seconds = time.perf_counter() - started
+    if response.status_code >= 400:
+        # The status line alone is useless. llama-server explains itself in the
+        # body -- one document here failed with "the model produced output that
+        # does not match the expected peg-native format", which is its response
+        # parser rejecting a transcription it had already produced. Nothing
+        # about that is visible from "500".
+        raise TranscriptionFailed(
+            f"{response.status_code} {_error_message(response)}"
+        )
     text = response.json()["choices"][0]["message"]["content"] or ""
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,16 +191,26 @@ def main(argv: list[str] | None = None) -> int:
 
     results: list[dict[str, bool]] = []
     seconds: list[float] = []
+    failures: list[str] = []
     for pdf_path, xml_path in pairs:
         inv = parse_cfdi_bytes(xml_path.read_bytes())
-        text, elapsed = transcribe(
-            pdf_path,
-            model=args.model,
-            prompt=args.prompt,
-            base_url=args.base_url,
-            dpi=args.dpi,
-            timeout=args.timeout,
-        )
+        try:
+            text, elapsed = transcribe(
+                pdf_path,
+                model=args.model,
+                prompt=args.prompt,
+                base_url=args.base_url,
+                dpi=args.dpi,
+                timeout=args.timeout,
+            )
+        except (TranscriptionFailed, httpx.HTTPError) as exc:
+            # A batch of 93 must not be lost to one document. A model that
+            # cannot read a page is a result about that model, and scoring it
+            # as "found nothing" is both true and the honest thing to report.
+            failures.append(str(exc))
+            results.append(dict.fromkeys(FIELDS, False))
+            print(f"      —  FAILED  {exc}", flush=True)
+            continue
         found = _present(inv, text)
         results.append(found)
         seconds.append(elapsed)
@@ -189,6 +222,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Stage-1 recall · {args.model} · {n} invoices · {args.dpi} DPI")
     print(f"prompt: {args.prompt!r}")
     print("Counts only. Whether a field was found, never the value.")
+    if failures:
+        print(f"{len(failures)} document(s) failed to transcribe and score as "
+              "found-nothing:")
+        for message in sorted(set(failures))[:5]:
+            print(f"  {failures.count(message):>3}×  {message}")
     print()
     print("| field | found | of |")
     print("|---|---:|---:|")

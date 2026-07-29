@@ -15,19 +15,35 @@ it; if it is absent nothing downstream can recover it.**
 
 ## Results
 
-Four real supplier invoices, 200 DPI, GTX 1660 Ti.
+93 real supplier invoices, 200 DPI, GTX 1660 Ti. An earlier version of this
+table had four, and said the numbers were directional only. They were: two
+columns moved by more than 20 points once the corpus grew.
 
-| field | `granite-docling` | `PaddleOCR-VL` one-shot | `PaddleOCR-VL` full pipeline | **PDF text layer** |
-|---|---:|---:|---:|---:|
-| `uuid` | 2/4 | **4/4** | **4/4** | 3/4 |
-| `rfc_emisor` | 3/4 | 3/4 | 3/4 | **4/4** |
-| `rfc_receptor` | 3/4 | **4/4** | **4/4** | **4/4** |
-| `subtotal` | 3/4 | **4/4** | **4/4** | **4/4** |
-| `total` | 0/4 | 1/4 | 3/4 | **4/4** |
-| `line_amounts` | 3/4 | **4/4** | **4/4** | **4/4** |
-| **fields found** | 14/24 | 20/24 | 22/24 | **23/24** |
-| latency / invoice | 17.4 s | 20.5 s | 621–1139 s | **<0.1 s** |
-| hardware | GPU | GPU | **CPU** | none |
+| field | `PaddleOCR-VL` one-shot | **PDF text layer** |
+|---|---:|---:|
+| `uuid` | 67/93 · 72% | **92/93 · 99%** |
+| `rfc_emisor` | 87/93 · 94% | **93/93 · 100%** |
+| `rfc_receptor` | 89/93 · 96% | **93/93 · 100%** |
+| `subtotal` | 80/93 · 86% | **93/93 · 100%** |
+| `total` | 69/93 · 74% | **93/93 · 100%** |
+| `line_amounts` | 74/93 · 80% | 87/93 · 94% |
+| **fields found** | 466/558 · **83%** | 551/558 · **99%** |
+| hard failures | 4 | 0 |
+| latency / invoice | 10 s | **<0.1 s** |
+
+`granite-docling` and the full PaddleOCR pipeline were measured on the first
+four invoices only, at 14/24 and 22/24. Those numbers are not comparable to
+this table and are kept below as the reason each was or was not pursued, not
+as results.
+
+**`uuid` is the headline.** PaddleOCR-VL scored 4/4 on four invoices and 72%
+on ninety-three. A long hex string has no linguistic redundancy for a model to
+lean on, and it is the field that defines which invoice a document *is*.
+
+The four hard failures are `llama-server` returning 500 with "the model
+produced output that does not match the expected peg-native format" — its
+response parser rejecting a transcription it had already produced. They score
+as found-nothing, which is the honest reading.
 
 The full-pipeline column ran on CPU because `paddlepaddle` installs a CPU
 build by default, so its latency is not comparable to the GPU columns. Its

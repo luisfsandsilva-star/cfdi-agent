@@ -1,9 +1,11 @@
 {
-  "fetched_at": "2026-07-28T01:04:26.238800+00:00",
+  "fetched_at": "2026-07-29T22:59:52.761510+00:00",
   "roots": [
     "http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd",
     "http://www.sat.gob.mx/sitio_internet/cfd/3/cfdv33.xsd",
-    "http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd"
+    "http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd",
+    "http://www.sat.gob.mx/sitio_internet/cfd/implocal/implocal.xsd",
+    "http://www.sat.gob.mx/sitio_internet/cfd/aerolineas/aerolineas.xsd"
   ],
   "note": "schemaLocation attributes are rewritten to relative local paths; sha256_upstream is of the ORIGINAL bytes as served by the SAT.",
   "files": [
@@ -29,10 +31,24 @@
       "rewritten": true
     },
     {
+      "url": "http://www.sat.gob.mx/sitio_internet/cfd/aerolineas/aerolineas.xsd",
+      "path": "www.sat.gob.mx/sitio_internet/cfd/aerolineas/aerolineas.xsd",
+      "sha256_upstream": "ccc233b428cc1379f790c5c4af9339da6957283ead4106ce1705518ea3f83cca",
+      "bytes_upstream": 3115,
+      "rewritten": false
+    },
+    {
       "url": "http://www.sat.gob.mx/sitio_internet/cfd/catalogos/catCFDI.xsd",
       "path": "www.sat.gob.mx/sitio_internet/cfd/catalogos/catCFDI.xsd",
       "sha256_upstream": "6c58936cb77576f839a4d7915953ceaf252b9eb9319f9458fe5bb67ae2bb0bb1",
       "bytes_upstream": 5984046,
+      "rewritten": false
+    },
+    {
+      "url": "http://www.sat.gob.mx/sitio_internet/cfd/implocal/implocal.xsd",
+      "path": "www.sat.gob.mx/sitio_internet/cfd/implocal/implocal.xsd",
+      "sha256_upstream": "c377fe22b3d96cc6f719cbc4264c6d5754be351339deb48cfe7c004fefe62d1b",
+      "bytes_upstream": 4175,
       "rewritten": false
     },
     {
