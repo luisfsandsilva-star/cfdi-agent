@@ -17,16 +17,21 @@ it; if it is absent nothing downstream can recover it.**
 
 Four real supplier invoices, 200 DPI, GTX 1660 Ti.
 
-| field | `granite-docling:258m` | `PaddleOCR-VL-1.6` | **PDF text layer** |
-|---|---:|---:|---:|
-| `uuid` | 2/4 | **4/4** | 3/4 |
-| `rfc_emisor` | 3/4 | 3/4 | **4/4** |
-| `rfc_receptor` | 3/4 | **4/4** | **4/4** |
-| `subtotal` | 3/4 | **4/4** | **4/4** |
-| `total` | 0/4 | 1/4 | **4/4** |
-| `line_amounts` | 3/4 | **4/4** | **4/4** |
-| median latency | 17.4 s | 20.5 s | **<0.1 s** |
-| total | 14/24 | 20/24 | **23/24** |
+| field | `granite-docling` | `PaddleOCR-VL` one-shot | `PaddleOCR-VL` full pipeline | **PDF text layer** |
+|---|---:|---:|---:|---:|
+| `uuid` | 2/4 | **4/4** | **4/4** | 3/4 |
+| `rfc_emisor` | 3/4 | 3/4 | 3/4 | **4/4** |
+| `rfc_receptor` | 3/4 | **4/4** | **4/4** | **4/4** |
+| `subtotal` | 3/4 | **4/4** | **4/4** | **4/4** |
+| `total` | 0/4 | 1/4 | 3/4 | **4/4** |
+| `line_amounts` | 3/4 | **4/4** | **4/4** | **4/4** |
+| **fields found** | 14/24 | 20/24 | 22/24 | **23/24** |
+| latency / invoice | 17.4 s | 20.5 s | 621–1139 s | **<0.1 s** |
+| hardware | GPU | GPU | **CPU** | none |
+
+The full-pipeline column ran on CPU because `paddlepaddle` installs a CPU
+build by default, so its latency is not comparable to the GPU columns. Its
+accuracy is.
 
 **The best model on this page is not a model.**
 
@@ -64,14 +69,21 @@ one that defines fiscal identity. Still 1/4 on `total`.
 Asking explicitly for the totals box moved `total` to 2/4 and pulled three
 other fields *down*. At four invoices that is noise.
 
-**The likely cause, untested.** PaddleOCR-VL's published 96.33% on
-OmniDocBench comes from its own pipeline: layout detection first, then
-recognition per cropped region. Driving it single-shot over a whole page
-through `llama-server` skips that first stage, so region selection is left to
-the model. The totals box on a CFDI is a small right-aligned block, exactly
-the kind of region a whole-page pass drops. Running the real PaddleOCR
-pipeline instead of one-shot llama.cpp is the next experiment, and it may be
-the whole difference.
+**Layout detection is most of the difference — tested.** PaddleOCR-VL's
+published 96.33% on OmniDocBench comes from its own pipeline: PP-DocLayoutV3
+detects regions, then the VLM recognizes each crop. Driving it single-shot
+through `llama-server` skips that and leaves region selection to the model.
+
+Running the real pipeline moves `total` from 1/4 to 3/4 and the transcription
+from ~2.4k characters to 10–20k. The totals box on a CFDI is a small
+right-aligned block, and a whole-page pass does drop it.
+
+An earlier note here claimed the opposite, on the strength of a probe that
+cropped the page to fixed rectangles — bottom half, bottom-right quadrant —
+and recovered the total on the same 1 of 4. That probe was not a test of the
+hypothesis. A fixed rectangle is not a detected region: it cuts through
+neighbouring blocks and hands the model a fragment rather than a clean cell.
+The conclusion drawn from it was wrong.
 
 **granite-4.0-3b-vision** is built for precisely this task — key-value pair
 extraction, tables to JSON, 85.5% exact-match on VAREX — but IBM's model card
