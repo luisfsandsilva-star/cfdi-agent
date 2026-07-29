@@ -55,7 +55,7 @@ base dedicada. Se regenera con un comando; nada de esto es estimado.
 
 **Rendimiento** 2 documentos/s · p50 9 ms · p95 16 ms
 **Costo** $0.00 por factura en la ruta XML — no interviene ningún modelo
-**Esquema** 290/300 validan contra el XSD oficial del SAT; los 16 fallos son
+**Esquema** 290/300 validan contra el XSD oficial del SAT; los 10 fallos son
 exactamente los RFCs malformados a propósito
 
 `semantic_dup` sale en recall 1.00 y precisión 0.70. El detector 2 ya corre
@@ -81,6 +81,32 @@ SQL hace el primer corte y la similitud solo confirma.
 positivo traza a una factura con RFC de emisor malformado, que la archiva bajo
 otro proveedor y deja hueco en la secuencia del real. Discutiblemente el
 veredicto correcto, e inflado aquí por un corpus que corrompe RFCs al ~5%.
+
+**Sobre el corpus.** Todos los números de arriba salen de facturas que este
+proyecto generó. El generador y el parser los escribió la misma persona, así
+que el corpus es una prueba débil de robustez: no tiene addendas, ni CFDI 3.3,
+ni más complemento que el timbre, ni más de una moneda o un tipo de
+comprobante.
+
+`evals.real_corpus` es el contrapeso. Corre facturas reales por el mismo
+pipeline y reporta cuántas sobreviven:
+
+```bash
+python -m evals.real_corpus data/real --skip-pdf
+```
+
+Mide robustez, no exactitud: recall y precisión no son calculables sin
+etiquetas, y una bandeja real viene casi limpia de todos modos.
+
+Imprime solo agregados —conteos, tasas, percentiles y nombres de etiqueta del
+XSD público del SAT—. Ningún campo de ningún documento se imprime. Los errores
+de validación se redactan antes de mostrarse, porque un mensaje de error cita
+el valor que lo causó, y en una factura real ese valor es el RFC de alguien.
+`data/` no está versionado, y el corpus va a su propia base `cfdi_real`.
+
+`--skip-pdf` cierra la ruta de visión. Sin esa bandera un PDF tiene que llegar
+a un modelo para leerse, y tier 2 significa la API de Anthropic: las facturas
+salen del edificio. Para eso existe la costura de tier 1.
 
 **De siete tipos de defecto inyectados, la validación XSD atrapa uno.**
 Duplicados, precios inflados y totales que no cuadran son todos perfectamente

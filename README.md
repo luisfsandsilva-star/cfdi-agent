@@ -116,6 +116,34 @@ high prices and incorrect totals are all valid against the schema.
 A valid schema does not tell you if you must pay an invoice. This is the reason
 for the detectors.
 
+### About the corpus itself
+
+Every number above comes from invoices this project generated. The generator
+and the parser were written by the same person, which makes the corpus a weak
+test of robustness: it contains no addenda, no CFDI 3.3, no complemento other
+than the fiscal stamp, one currency, and one document type.
+
+`evals.real_corpus` is the check on that. It runs real invoices through the
+same pipeline and reports how many survive:
+
+```bash
+python -m evals.real_corpus data/real --skip-pdf
+```
+
+It measures robustness, not accuracy. Recall and precision are not computable
+here, because nobody labelled a real inbox, and a real inbox is almost fully
+correct anyway.
+
+It prints aggregates only — counts, rates, percentiles, and tag names from the
+public SAT schema. No field of any document is printed. Validation errors are
+redacted before display, because an error message quotes the value that caused
+it, and on a real invoice that value is a person's RFC. `data/` is not tracked
+by git, and the corpus goes into its own `cfdi_real` database.
+
+`--skip-pdf` refuses the vision path. Without it, a PDF must reach a model to
+be read, and tier 2 means the Anthropic API. Real invoices then leave the
+building. This is what the tier 1 seam exists for.
+
 ---
 
 ## Architecture
