@@ -335,3 +335,79 @@ def test_the_finding_carries_verifiable_evidence() -> None:
     assert match["folio"] == "60"
     assert Decimal(match["total"]) == Decimal("1160.00")
     assert match["similitud"] >= 0.93
+
+
+# ------------------------------------------------------------ circuit breaker
+
+
+class FlakyBackend:
+    """Fails the first `n` calls, then works. Named `local` so it is treated
+    as the shared backend, which is the one the breaker guards."""
+
+    name = "local"
+
+    def __init__(self, failures: int) -> None:
+        self.remaining = failures
+        self.calls = 0
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        from cfdi_agent.extract.providers.base import ProviderError
+
+        self.calls += 1
+        if self.remaining > 0:
+            self.remaining -= 1
+            raise ProviderError("model is loading")
+        return [[0.0] * DIM for _ in texts]
+
+
+def test_a_transient_backend_failure_does_not_silence_the_detector(monkeypatch) -> None:
+    """One blip must not disable the stage for the rest of the process.
+
+    This tripped on the first failure once. A real eval hit it: the vision
+    model still held the GPU when the run started, the embedding model could
+    not load for a few seconds, and all 300 documents came back unembedded.
+    """
+    from cfdi_agent.enrich import embeddings
+    from cfdi_agent.enrich.anomalies import FAILURES_BEFORE_TRIPPING
+
+    backend = FlakyBackend(FAILURES_BEFORE_TRIPPING - 1)
+    monkeypatch.setattr(embeddings, "embedding_provider", lambda: backend)
+    for index in range(FAILURES_BEFORE_TRIPPING + 1):
+        invoice_id = _insert(
+            f"A1B2C3D4-0000-4000-8000-0000000001{index:02d}", f"7{index}", "Servicio"
+        )
+        anomalies, reason = _run(invoice_id, None)
+    assert reason is None
+    assert backend.calls == FAILURES_BEFORE_TRIPPING + 1
+
+
+def test_a_dead_backend_still_stops_being_called(monkeypatch) -> None:
+    """The property the breaker exists for, unchanged.
+
+    Driven through the shared path, because that is the only path the breaker
+    covers — an injected provider is the caller's business in both directions.
+    """
+    from cfdi_agent.enrich import anomalies, embeddings
+
+    backend = FlakyBackend(999)
+    monkeypatch.setattr(embeddings, "embedding_provider", lambda: backend)
+    for index in range(10):
+        invoice_id = _insert(
+            f"A1B2C3D4-0000-4000-8000-0000000002{index:02d}", f"8{index}", "Servicio"
+        )
+        _run(invoice_id, None)
+    assert backend.calls == anomalies.FAILURES_BEFORE_TRIPPING
+
+
+def test_an_injected_provider_never_trips_the_shared_breaker() -> None:
+    """A caller's own failing provider must not disable a backend it never used."""
+    from cfdi_agent.enrich import anomalies
+
+    backend = FlakyBackend(999)
+    for index in range(6):
+        invoice_id = _insert(
+            f"A1B2C3D4-0000-4000-8000-0000000003{index:02d}", f"9{index}", "Servicio"
+        )
+        _run(invoice_id, backend)
+    assert backend.calls == 6
+    assert anomalies._BACKEND_DOWN is None

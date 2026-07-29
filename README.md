@@ -59,7 +59,7 @@ each of these fields: `uuid`, `rfc_emisor`, `rfc_receptor`, `subtotal`,
 | `total_mismatch` | 8 | 1.00 | 1.00 | 1.00 |
 
 **Speed.** The software processes 2 documents each second. The p50 latency is
-15 ms. The p95 latency is 16 ms.
+15 ms. The p95 latency is 22 ms.
 
 **Cost.** The XML path costs $0.00 for each invoice, because it uses no model.
 
@@ -143,6 +143,55 @@ by git, and the corpus goes into its own `cfdi_real` database.
 `--skip-pdf` refuses the vision path. Without it, a PDF must reach a model to
 be read, and tier 2 means the Anthropic API. Real invoices then leave the
 building. This is what the tier 1 seam exists for.
+
+**Result on four real invoices from four different issuers.** All four parse.
+All four validate against the SAT schema chain. No detector fires except
+`new_supplier`, which is correct on a first sighting. The parser needed no
+change to read documents it did not generate.
+
+The first run of this reported the opposite — four documents held for review —
+and the cause was `COMPANY_RFC` still holding the synthetic default. The guard
+was working correctly against the wrong configuration. That run also showed
+that the report gave no reason for a refusal, which is now fixed.
+
+## Vision, measured against ground truth
+
+Each real invoice arrives as a PDF **and** an XML of the same document. The XML
+parses deterministically, so it is ground truth — free, exact, and not written
+by the same hand as the thing being scored.
+
+```bash
+python -m evals.vision_accuracy data/real --provider local --model qwen2.5vl:3b
+```
+
+Four real supplier invoices, `qwen2.5vl:3b` on a GTX 1660 Ti, 200 DPI:
+
+| field | accuracy |
+|---|---:|
+| `uuid` | 50% |
+| `rfc_emisor` | 75% |
+| `rfc_receptor` | 25% |
+| `subtotal` | 25% |
+| `total` | 25% |
+| `moneda` | 50% |
+| `n_conceptos` | 50% |
+
+**Zero of four invoices were fully correct. p50 latency 68 seconds.** Tier 0
+reads the same four invoices in 27 milliseconds with no transcription step, so
+it has no error of this kind to make.
+
+Four invoices is a small sample and the percentages are coarse. The conclusion
+does not depend on the precision: a 3B vision model on a real Mexican invoice
+gets the total wrong three times out of four, at every resolution between 150
+and 250 DPI.
+
+This is the design argument of the project, measured instead of asserted.
+Sending a document that is already structured data to a model costs money and
+**adds a transcription failure mode that did not previously exist**. The vision
+path is for the case where no XML arrives at all, and this table is its price.
+
+A frontier model would do considerably better. That comparison needs an API key
+and has not been run, so it is not reported here.
 
 ---
 

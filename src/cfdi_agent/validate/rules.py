@@ -93,6 +93,20 @@ class HistoryContext:
     detectors simply stay quiet rather than firing spuriously.
     """
 
+    # Whether this context was read from the ledger at all.
+    #
+    # An empty history and an unread history look identical from the fields
+    # alone, and for most detectors that does not matter: no known folio means
+    # no gap either way. `new_supplier` inverts it — with a genuinely empty
+    # ledger, every supplier is new. Without this flag it stayed silent on the
+    # first invoice ever loaded, which is exactly the invoice a first-day
+    # operator is watching.
+    #
+    # Third time this project has needed the distinction between "not recorded"
+    # and "recorded as nothing" (see `seen_folios` and `processed_files`). It is
+    # the shape of bug this domain keeps producing.
+    loaded: bool = False
+
     known_uuids: frozenset[str] = frozenset()
     known_rfcs: frozenset[str] = frozenset()
     # (rfc_emisor, serie) -> highest folio seen so far
@@ -236,7 +250,7 @@ def detect_new_supplier(inv: ParsedInvoice, ctx: HistoryContext) -> Anomaly | No
     Informational on its own. It matters as corroboration: a new supplier plus
     an odd amount is a very different signal from either alone.
     """
-    if ctx.known_rfcs and inv.rfc_emisor not in ctx.known_rfcs:
+    if (ctx.loaded or ctx.known_rfcs) and inv.rfc_emisor not in ctx.known_rfcs:
         return Anomaly(
             kind="new_supplier",
             severity="info",

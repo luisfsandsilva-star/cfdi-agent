@@ -1,17 +1,17 @@
 # Eval report
 
-Generated 2026-07-28T23:43:15+00:00 · corpus 300 · seed 1312 · defect rate 25%
+Generated 2026-07-29T01:48:01+00:00 · corpus 300 · seed 1312 · defect rate 25%
 
 Every figure below is produced by `python -m evals.run_eval` against a dedicated `cfdi_eval` database. Nothing here is estimated.
 
 ## Ingest
 
-300 documents in 166.16s (2/s)
+300 documents in 172.81s (2/s)
 
 | status | n |
 |---|---:|
-| `ok` | 232 |
-| `anomaly` | 68 |
+| `ok` | 231 |
+| `anomaly` | 69 |
 
 ## Field accuracy — tier 0 (deterministic XML)
 
@@ -47,7 +47,7 @@ These describe an invoice rather than accuse it, so they have no injected ground
 
 | detector | invoices |
 |---|---:|
-| `new_supplier` | 11 |
+| `new_supplier` | 12 |
 | `stale_stamp` | 0 |
 | `unknown_catalog_code` | 0 |
 
@@ -64,9 +64,9 @@ These did not report, and that is not the same as reporting nothing. The corpus 
 
 | percentile | ms |
 |---|---:|
-| p50 | 9 |
-| p95 | 16 |
-| max | 29 |
+| p50 | 11 |
+| p95 | 22 |
+| max | 25 |
 
 ## Cost
 

@@ -53,7 +53,7 @@ base dedicada. Se regenera con un comando; nada de esto es estimado.
 | `semantic_dup` | 14 | 1.00 | 0.70 | 0.82 |
 | `total_mismatch` | 8 | 1.00 | 1.00 | 1.00 |
 
-**Rendimiento** 2 documentos/s · p50 9 ms · p95 16 ms
+**Rendimiento** 2 documentos/s · p50 11 ms · p95 22 ms
 **Costo** $0.00 por factura en la ruta XML — no interviene ningún modelo
 **Esquema** 290/300 validan contra el XSD oficial del SAT; los 10 fallos son
 exactamente los RFCs malformados a propósito
@@ -107,6 +107,50 @@ el valor que lo causó, y en una factura real ese valor es el RFC de alguien.
 `--skip-pdf` cierra la ruta de visión. Sin esa bandera un PDF tiene que llegar
 a un modelo para leerse, y tier 2 significa la API de Anthropic: las facturas
 salen del edificio. Para eso existe la costura de tier 1.
+
+**Resultado sobre cuatro facturas reales de cuatro emisores distintos.** Las
+cuatro parsean. Las cuatro validan contra el XSD del SAT. Ningún detector
+dispara salvo `new_supplier`, que es correcto en un primer avistamiento. El
+parser no necesitó un solo cambio para leer documentos que no generó él.
+
+## Visión, medida contra ground truth
+
+Cada factura real llega como PDF **y** como XML del mismo documento. El XML
+parsea de manera determinista, así que es ground truth: gratis, exacto, y no
+escrito por la misma mano que lo que se está calificando.
+
+```bash
+python -m evals.vision_accuracy data/real --provider local --model qwen2.5vl:3b
+```
+
+Cuatro facturas reales, `qwen2.5vl:3b` sobre una GTX 1660 Ti, 200 DPI:
+
+| campo | exactitud |
+|---|---:|
+| `uuid` | 50% |
+| `rfc_emisor` | 75% |
+| `rfc_receptor` | 25% |
+| `subtotal` | 25% |
+| `total` | 25% |
+| `moneda` | 50% |
+| `n_conceptos` | 50% |
+
+**Cero de cuatro facturas salieron completamente correctas. p50 de 68
+segundos.** Tier 0 lee esas mismas cuatro en 27 milisegundos sin paso de
+transcripción, así que no tiene este tipo de error que cometer.
+
+Cuatro facturas es una muestra chica y los porcentajes son gruesos. La
+conclusión no depende de la precisión: un modelo de visión de 3B sobre una
+factura mexicana real se equivoca en el total tres de cada cuatro veces, en
+todas las resoluciones entre 150 y 250 DPI.
+
+Esta es la tesis del proyecto, medida en vez de afirmada. Mandar a un modelo un
+documento que ya es dato estructurado cuesta dinero y **agrega un modo de falla
+por transcripción que antes no existía**. La ruta de visión es para cuando no
+llega XML, y esta tabla es su precio.
+
+Un modelo frontera lo haría bastante mejor. Esa comparación necesita API key y
+no se ha corrido, así que no se reporta aquí.
 
 **De siete tipos de defecto inyectados, la validación XSD atrapa uno.**
 Duplicados, precios inflados y totales que no cuadran son todos perfectamente

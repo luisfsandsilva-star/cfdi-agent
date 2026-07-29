@@ -169,17 +169,29 @@ def detect_semantic_duplicate(
     )
 
 
-# Set once the shared embedding backend has failed, so a batch of 300 invoices
-# does not wait on the same dead host 300 times. Ingesting the corpus with
-# EMBED_BASE_URL pointing at an offline machine went from 9 seconds to
-# unbounded before this existed.
+# Set once the shared embedding backend has failed repeatedly, so a batch of
+# 300 invoices does not wait on the same dead host 300 times. Ingesting the
+# corpus with EMBED_BASE_URL pointing at an offline machine went from 9 seconds
+# to unbounded before this existed.
 _BACKEND_DOWN: str | None = None
+_CONSECUTIVE_FAILURES = 0
+
+# Tripping on the first failure was wrong, and a real run showed why: the
+# vision model was still resident in GPU memory when an eval started, the
+# embedding model could not load for a few seconds, and one transient error
+# silenced the detector for all 300 documents. The report said so rather than
+# printing a zero, which is the only reason it was caught.
+#
+# Three keeps the original property — a genuinely dead host costs 3 × 15 s
+# instead of 300 × 15 s — while surviving contention that resolves itself.
+FAILURES_BEFORE_TRIPPING = 3
 
 
 def reset_backend_state() -> None:
     """Forget a previous failure. For tests and long-lived processes."""
-    global _BACKEND_DOWN
+    global _BACKEND_DOWN, _CONSECUTIVE_FAILURES
     _BACKEND_DOWN = None
+    _CONSECUTIVE_FAILURES = 0
 
 
 def run_vector_stage(
@@ -200,23 +212,30 @@ def run_vector_stage(
     """
     from cfdi_agent.extract.providers.base import ProviderError
 
-    global _BACKEND_DOWN
+    global _BACKEND_DOWN, _CONSECUTIVE_FAILURES
     if provider is None and _BACKEND_DOWN is not None:
         return [], _BACKEND_DOWN
 
+    shared = provider is None
     try:
-        if provider is None:
+        if shared:
             from cfdi_agent.enrich.embeddings import embedding_provider
 
             provider = embedding_provider()
         embed_invoice(conn, invoice_id, provider)
     except ProviderError as exc:
-        # Trip the breaker only for the shared backend. An injected provider is
-        # the caller's business and must not poison the process.
-        if provider is None or getattr(provider, "name", None) == "local":
-            _BACKEND_DOWN = str(exc)
+        # The breaker covers the shared backend and nothing else, on both
+        # sides: an injected provider is neither counted against it nor
+        # stopped by it. Counting one but not the other let a caller's own
+        # provider disable the shared path it never used.
+        if shared:
+            _CONSECUTIVE_FAILURES += 1
+            if _CONSECUTIVE_FAILURES >= FAILURES_BEFORE_TRIPPING:
+                _BACKEND_DOWN = str(exc)
         return [], str(exc)
 
+    if shared:
+        _CONSECUTIVE_FAILURES = 0
     anomaly = detect_semantic_duplicate(conn, invoice_id)
     return ([anomaly] if anomaly else []), None
 

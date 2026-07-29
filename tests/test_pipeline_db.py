@@ -111,7 +111,12 @@ def test_clean_invoice_is_persisted_whole(corpus) -> None:
 
     out, labels = corpus
     outcome = _ingest(out / labels[0]["file"])
-    assert outcome.status == "ok", outcome.summary
+    # `new_supplier` on the first invoice of an empty ledger is correct and
+    # informational. This test used to assert `ok` here, which passed only
+    # because the detector was silently exempting the very first invoice ever
+    # loaded — the one an operator on day one is actually watching.
+    assert outcome.status in ("ok", "anomaly"), outcome.summary
+    assert all(a["severity"] == "info" for a in outcome.anomalies), outcome.summary
 
     row = fetch_one(
         """
@@ -133,13 +138,16 @@ def test_same_file_twice_is_idempotent(corpus) -> None:
 
     out, labels = corpus
     first = _ingest(out / labels[0]["file"])
+    before_retry = fetch_one("SELECT count(*) AS n FROM anomalies")["n"]
     second = _ingest(out / labels[0]["file"])
 
     assert second.status == "duplicate_file"
     assert second.uuid == first.uuid
     assert second.anomalies == []
     assert fetch_one("SELECT count(*) AS n FROM invoices")["n"] == 1
-    assert fetch_one("SELECT count(*) AS n FROM anomalies")["n"] == 0
+    # Whatever the first pass wrote, the retry adds nothing. The absolute count
+    # is not the invariant — the delta is.
+    assert fetch_one("SELECT count(*) AS n FROM anomalies")["n"] == before_retry
 
 
 def test_duplicate_uuid_attaches_to_the_existing_invoice(corpus, tmp_path) -> None:
@@ -280,8 +288,14 @@ def test_a_declined_document_is_also_idempotent(corpus, tmp_path) -> None:
         assert again.status == "duplicate_file"
 
     assert fetch_one("SELECT count(*) AS n FROM anomalies")["n"] == after_first
+    # Filter on the twin's own hash. `status = 'anomaly'` used to identify it
+    # uniquely and no longer does: the first invoice of an empty ledger now
+    # correctly reports `new_supplier`, so two rows carry that status.
+    from cfdi_agent.ingest.dedupe import sha256_bytes
+
     assert fetch_one(
-        "SELECT seen_count AS n FROM processed_files WHERE status = 'anomaly'"
+        "SELECT seen_count AS n FROM processed_files WHERE file_hash = %s",
+        (sha256_bytes(twin.read_bytes()),),
     )["n"] == 4
 
 

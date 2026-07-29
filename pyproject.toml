@@ -20,6 +20,14 @@ api = [
 llm = [
     "anthropic>=0.69",
 ]
+# The local tier-1 path. Only pypdfium2, and only because a local VLM takes
+# images while a CFDI arrives as PDF. A pure wheel with no system packages
+# behind it, which is what keeps `pip install` the whole setup story.
+local = [
+    "pypdfium2>=4.30",
+    # pdfium renders to a raw bitmap; Pillow is what turns that into PNG.
+    "pillow>=10.0",
+]
 synth = [
     "jinja2>=3.1",
     "faker>=30.0",

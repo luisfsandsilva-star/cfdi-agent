@@ -76,6 +76,12 @@ _FALLBACK = (
     (re.compile(r"\b[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\b"), "<uuid>"),
     (re.compile(r"\b\d{4}-\d{2}-\d{2}(T[\d:.]+)?"), "<date>"),
     (re.compile(r"\d[\d,]*\.\d{2,}"), "<amount>"),
+    # Deliberately looser than the real RFC rule. This one runs over messages
+    # this project writes itself — a rejection reason names the RFC it rejected
+    # — where the value is unquoted and the positional scrub above cannot see
+    # it. Being loose is correct here: over-redacting a catalog code costs a
+    # little clarity, under-redacting costs somebody's tax ID.
+    (re.compile(r"\b[A-ZÑ&]{3,4}\d{4,6}[A-Z0-9]{0,3}\b"), "<rfc>"),
 )
 
 
@@ -280,6 +286,20 @@ def report(**kw) -> None:
     for status, n in kw["statuses"].most_common():
         print(_bar(status, n, total))
     print()
+
+    # Without this, `needs_review` is an unexplained bar and reads like a
+    # parser failure. The first real run put all four invoices here, and the
+    # reason was that COMPANY_RFC still held the synthetic default — the guard
+    # working correctly against the wrong configuration. A refusal has to say
+    # which refusal it was.
+    refused = kw["fetch_all"](
+        "SELECT reason, count(*) AS n FROM review_queue GROUP BY reason ORDER BY n DESC"
+    )
+    if refused:
+        print("Held for review — why the pipeline declined to persist")
+        for row in refused[:12]:
+            print(f"  {row['n']:>3}×  {_scrub(row['reason'])}")
+        print()
 
     if kw["failures"]:
         print("Failures — the reason the corpus is worth running")

@@ -47,20 +47,25 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # Embeddings for detector 2 (semantic duplicate). Opt-in, because the
-  # deterministic pipeline does not need it and the model is another ~1.2 GB:
+  # Local inference. Opt-in, because the deterministic pipeline needs none of
+  # it: this serves detector 2's embeddings and the tier-1 vision model, and
+  # tier 0 runs without either.
+  #
+  # CPU is enough for embeddings. Embedding a line-item description is
+  # milliseconds; this does not need the Orin, and running it here is what
+  # makes detector 2 measurable without any other hardware.
+  #
+  # The same service also serves the tier-1 vision model, and that one does
+  # want a GPU:
   #
   #   docker compose --profile embeddings up -d
   #   docker compose exec embeddings ollama pull bge-m3
+  #   docker compose exec embeddings ollama pull qwen2.5vl:7b
   #
   # bge-m3 is multilingual, strong on Spanish, and returns 1024 dimensions,
   # which is what `line_items.embedding` is declared as. A model with a
   # different width fails loudly in `embed_invoice` rather than corrupting the
-  # index. Ollama speaks the OpenAI embeddings API, so no code changes.
-  #
-  # CPU is enough. Embedding a line-item description is milliseconds; this does
-  # not need the Orin, and running it here is what makes detector 2 measurable
-  # without any other hardware.
+  # index. Ollama speaks the OpenAI API for both, so no code changes.
   embeddings:
     image: ollama/ollama
     container_name: cfdi-ollama
@@ -68,8 +73,25 @@ services:
     restart: unless-stopped
     ports:
       - "11434:11434"
+    environment:
+      # 4096 is the Ollama default and a rasterized invoice page does not fit
+      # in it: one letter-size page at 200 DPI is ~4200 image tokens before a
+      # single word of prompt. The first attempt failed with "request (4220
+      # tokens) exceeds the available context size (4096 tokens)".
+      OLLAMA_CONTEXT_LENGTH: "8192"
     volumes:
       - ollama:/root/.ollama
+    # Optional. Without a GPU present Ollama runs on CPU and everything still
+    # works — embeddings are unaffected, and the vision model is the only thing
+    # that becomes impractical. Docker Compose ignores this block when no
+    # nvidia runtime is installed, so it is safe to leave in place.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   pgdata:

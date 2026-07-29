@@ -133,6 +133,17 @@ def _use_eval_database() -> None:
         )
 
 
+# The corpus is generated addressed to this RFC, so the harness states it
+# rather than reading COMPANY_RFC out of the environment.
+#
+# It used to inherit the ambient config, and a measurement that depends on
+# deployment settings is not a measurement. Pointing COMPANY_RFC at a real
+# company — the ordinary thing to do when running against real invoices — sent
+# all 300 synthetic documents to `needs_review` and zeroed every number in the
+# report, including the field accuracies that are exact by construction.
+EVAL_RECEPTOR_RFC = "XAXX010101000"
+
+
 def _ingest_corpus(corpus_dir: Path, labels: list[dict]) -> tuple[dict[str, int], float]:
     from cfdi_agent.db.conn import connect
     from cfdi_agent.ingest.pipeline import ingest_file
@@ -141,8 +152,17 @@ def _ingest_corpus(corpus_dir: Path, labels: list[dict]) -> tuple[dict[str, int]
     started = time.perf_counter()
     for label in labels:
         with connect() as conn:
-            outcome = ingest_file(conn, corpus_dir / label["file"])
+            outcome = ingest_file(
+                conn, corpus_dir / label["file"], company_rfc=EVAL_RECEPTOR_RFC
+            )
         counts[outcome.status] += 1
+    if counts.get("needs_review", 0) == len(labels):
+        # Fail loudly instead of writing a report full of zeros that looks like
+        # a catastrophic regression.
+        raise SystemExit(
+            f"every document was refused. The corpus is addressed to "
+            f"{EVAL_RECEPTOR_RFC}; check that the pipeline is being told so."
+        )
     return dict(counts), time.perf_counter() - started
 
 
@@ -356,7 +376,7 @@ def run(n: int, seed: int, defect_rate: float, models: list[str]) -> EvalReport:
         labels_path=Path("evals/datasets/eval_labels.jsonl"),
         seed=seed,
         n_suppliers=6,
-        receptor_rfc="XAXX010101000",
+        receptor_rfc=EVAL_RECEPTOR_RFC,
         receptor_nombre="Mi Empresa SA de CV",
     )
 

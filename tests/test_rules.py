@@ -184,8 +184,15 @@ def test_new_supplier_flagged_as_info() -> None:
     assert anomaly.severity == "info"
 
 
-def test_empty_history_does_not_flag_every_supplier() -> None:
-    """On a cold database everyone is 'new'; that is noise, not signal."""
+def test_an_unread_history_does_not_flag_every_supplier() -> None:
+    """A default context means nobody looked, not that nobody was there.
+
+    This test used to read "on a cold database everyone is new; that is noise",
+    and that reasoning was wrong in a way that cost the first invoice of every
+    ledger. On a genuinely cold database everyone *is* new, and saying so is
+    the correct `info` — see `TestNewSupplierOnAColdLedger`. What must stay
+    silent is a context nobody populated, which is what `loaded` now separates.
+    """
     assert detect_new_supplier(make_invoice(), HistoryContext()) is None
 
 
@@ -414,3 +421,36 @@ def test_clean_invoices_raise_no_critical_anomaly(replayed) -> None:
         lb["file"] for lb, kinds in replayed if not lb["defects"] and (kinds & critical)
     ]
     assert not offenders, f"false positives on clean invoices: {offenders}"
+
+
+class TestNewSupplierOnAColdLedger:
+    """The distinction between an unread history and an empty one.
+
+    `new_supplier` is the only detector where the two invert: with a genuinely
+    empty ledger every supplier is new, while an unread history must stay
+    silent. Guarding on `known_rfcs` alone conflates them, and the invoice that
+    goes missing is the first one ever processed — the one a first-day operator
+    is watching.
+    """
+
+    def test_the_very_first_invoice_reports_a_new_supplier(self) -> None:
+        from cfdi_agent.validate.rules import HistoryContext, detect_new_supplier
+
+        inv = make_invoice()
+        found = detect_new_supplier(inv, HistoryContext(loaded=True))
+        assert found is not None
+        assert found.kind == "new_supplier"
+        assert found.evidence["known_supplier_count"] == 0
+
+    def test_an_unread_history_stays_silent(self) -> None:
+        """Validating one invoice in isolation must not accuse anybody."""
+        from cfdi_agent.validate.rules import HistoryContext, detect_new_supplier
+
+        assert detect_new_supplier(make_invoice(), HistoryContext()) is None
+
+    def test_a_known_supplier_is_not_new(self) -> None:
+        from cfdi_agent.validate.rules import HistoryContext, detect_new_supplier
+
+        inv = make_invoice()
+        ctx = HistoryContext(loaded=True, known_rfcs=frozenset({inv.rfc_emisor}))
+        assert detect_new_supplier(inv, ctx) is None

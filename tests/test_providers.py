@@ -233,10 +233,59 @@ def test_local_extract_parses_and_validates(mock_httpx) -> None:
     assert result.cost_usd is None
 
 
-def test_local_refuses_pdf_with_an_actionable_message() -> None:
-    provider = OpenAICompatProvider(base_url="http://orin:8080/v1", model="qwen")
-    with pytest.raises(UnsupportedMediaError, match="Rasterize"):
-        provider.extract_invoice(b"%PDF-1.7", media_type="application/pdf")
+def test_local_rasterizes_a_pdf_into_pages() -> None:
+    """The local backend takes images, so the PDF is converted at its boundary.
+
+    Nothing above the provider should have to know which tier can read which
+    container format.
+    """
+    pytest.importorskip("pypdfium2")
+    from cfdi_agent.extract.providers.openai_compat import rasterize_pdf
+
+    pages = rasterize_pdf(_one_page_pdf(), dpi=72)
+    assert len(pages) == 1
+    assert pages[0].startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_a_missing_rasterizer_names_the_install(monkeypatch) -> None:
+    """The optional extra is missing far more often than the PDF is broken."""
+    import builtins
+
+    from cfdi_agent.extract.providers.openai_compat import rasterize_pdf
+
+    real_import = builtins.__import__
+
+    def refuse(name, *args, **kwargs):
+        if name == "pypdfium2":
+            raise ImportError("no pypdfium2")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", refuse)
+    with pytest.raises(UnsupportedMediaError, match=r"\.\[local\]"):
+        rasterize_pdf(b"%PDF-1.7")
+
+
+def _one_page_pdf() -> bytes:
+    """The smallest PDF pdfium will open: one empty Letter page."""
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % index + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
+    )
+    return bytes(out)
 
 
 def test_local_embeddings_are_reordered_by_index(mock_httpx) -> None:

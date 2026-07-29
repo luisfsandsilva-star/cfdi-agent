@@ -114,3 +114,23 @@ class TestSurvey:
         out = survey_xml(older)
         assert out["version"] == ["3.3"]
         assert out["complementos"] == ["TimbreFiscalDigital"]
+
+
+class TestScrubOnOwnMessages:
+    """Rejection reasons this project writes name the RFC they rejected.
+
+    Those are unquoted, so the positional scrub cannot see them and the loose
+    fallback pattern is what has to catch them.
+    """
+
+    def test_a_rejection_reason_does_not_leak_either_rfc(self) -> None:
+        out = _scrub("invoice is addressed to API120327LD6, not to XAXX010101000")
+        assert "API120327LD6" not in out
+        assert "XAXX010101000" not in out
+        assert "addressed to" in out
+
+    def test_a_sat_catalog_code_is_not_mistaken_for_an_rfc(self) -> None:
+        """Over-redaction is the safe direction, but not to the point of noise."""
+        out = _scrub("unknown ClaveProdServ 80161501 and ClaveUnidad H87")
+        assert "80161501" in out
+        assert "H87" in out

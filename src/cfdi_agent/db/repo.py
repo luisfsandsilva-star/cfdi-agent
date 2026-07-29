@@ -178,6 +178,7 @@ def build_history_context(conn: Connection[Any], inv: ParsedInvoice) -> HistoryC
                 )
 
     return HistoryContext(
+        loaded=True,
         known_uuids=known_uuids,
         known_rfcs=known_rfcs,
         last_folio=last_folio,
