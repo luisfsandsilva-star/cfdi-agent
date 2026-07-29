@@ -38,6 +38,14 @@ Severity = Literal["info", "warn", "critical"]
 
 # CFDI amounts are cent-precision; a one-cent gap is rounding, not fraud.
 MONEY_TOLERANCE = Decimal("0.01")
+# Each line's `importe` is rounded to cents by the issuer, so the sum of n
+# lines can sit up to half a cent per line away from a declared subtotal that
+# was computed before rounding. A real 4-line invoice missed by 0.02 and was
+# reported critical; the arithmetic was the issuer's, and correct.
+#
+# Deliberately not a flat wider tolerance: that would blind the detector on
+# single-line invoices, where 0.02 really is wrong.
+LINE_ROUNDING_TOLERANCE = Decimal("0.005")
 
 # Robust z-score cutoff for the price outlier detector.
 PRICE_Z_THRESHOLD = Decimal("3.5")
@@ -207,7 +215,10 @@ def detect_arithmetic(inv: ParsedInvoice) -> list[Anomaly]:
             )
         )
 
-    if inv.conceptos and abs(inv.subtotal - inv.subtotal_esperado) > MONEY_TOLERANCE:
+    subtotal_tolerance = max(
+        MONEY_TOLERANCE, LINE_ROUNDING_TOLERANCE * len(inv.conceptos)
+    )
+    if inv.conceptos and abs(inv.subtotal - inv.subtotal_esperado) > subtotal_tolerance:
         out.append(
             Anomaly(
                 kind="subtotal_mismatch",

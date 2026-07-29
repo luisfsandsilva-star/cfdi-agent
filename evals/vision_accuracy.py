@@ -133,12 +133,19 @@ def find_pairs(directory: Path) -> list[tuple[Path, Path]]:
     Matched on filename stem, which is how a PAC delivers them and how an
     accounting inbox stores them. A PDF without its XML is skipped rather than
     guessed at — there would be nothing to score it against.
+
+    Case-insensitively, because a real delivery does not agree with itself: the
+    batch this was written against names every PDF with a lowercase UUID and
+    every XML with the same UUID in uppercase. An exact-stem match found 4
+    pairs in it instead of 93.
     """
-    xmls = {p.stem: p for p in directory.rglob("*") if p.suffix.lower() == ".xml"}
+    xmls = {
+        p.stem.lower(): p for p in directory.rglob("*") if p.suffix.lower() == ".xml"
+    }
     return sorted(
-        (p, xmls[p.stem])
+        (p, xmls[p.stem.lower()])
         for p in directory.rglob("*")
-        if p.suffix.lower() == ".pdf" and p.stem in xmls
+        if p.suffix.lower() == ".pdf" and p.stem.lower() in xmls
     )
 
 

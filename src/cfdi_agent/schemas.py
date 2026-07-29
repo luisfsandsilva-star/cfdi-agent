@@ -173,6 +173,15 @@ class ParsedInvoice(BaseModel):
     conceptos: list[Concepto] = Field(default_factory=list)
     impuestos: list[Impuesto] = Field(default_factory=list)
 
+    # State-level taxes, from the `implocal` complement. Separate from
+    # `impuestos` because they are not federal and do not appear in
+    # cfdi:Impuestos, but they do move the total: two invoices in a 95-document
+    # real batch reported a total higher than subtotal + traslados by exactly
+    # their TotaldeTraslados, and were flagged critical for arithmetic that was
+    # in fact correct.
+    traslados_locales: Money = Decimal("0.00")
+    retenciones_locales: Money = Decimal("0.00")
+
     source: Source = "xml"
 
     @field_validator("rfc_emisor", "rfc_receptor", mode="before")
@@ -224,10 +233,15 @@ class ParsedInvoice(BaseModel):
 
     @property
     def total_esperado(self) -> Decimal:
-        """subtotal - descuento + traslados - retenciones."""
-        return (self.subtotal - self.descuento + self.traslados - self.retenciones).quantize(
-            CENTS
-        )
+        """subtotal - descuento + traslados - retenciones, federal and local."""
+        return (
+            self.subtotal
+            - self.descuento
+            + self.traslados
+            - self.retenciones
+            + self.traslados_locales
+            - self.retenciones_locales
+        ).quantize(CENTS)
 
 
 # --------------------------------------------------------------------------

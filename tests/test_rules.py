@@ -454,3 +454,62 @@ class TestNewSupplierOnAColdLedger:
         inv = make_invoice()
         ctx = HistoryContext(loaded=True, known_rfcs=frozenset({inv.rfc_emisor}))
         assert detect_new_supplier(inv, ctx) is None
+
+
+class TestArithmeticOnRealWorldShapes:
+    """Two critical false positives found in a 95-invoice real batch.
+
+    Both were the detector accusing arithmetic the issuer's PAC had already
+    validated, which is a strong prior: a stamped CFDI that does not add up
+    should be rare, so a firing is first evidence against the parser.
+    """
+
+    def test_local_taxes_count_toward_the_total(self) -> None:
+        """The `implocal` complement carries state taxes — lodging tax and
+        similar. They are absent from cfdi:Impuestos but the issuer charges
+        them, so a total ignoring them is short by exactly TotaldeTraslados.
+        Two real invoices were flagged for precisely that amount.
+        """
+        inv = make_invoice(
+            subtotal="200.00", total="254.51", traslados_locales="22.51"
+        )
+        assert inv.total_esperado == Decimal("254.51")
+        assert [a for a in detect_arithmetic(inv) if a.kind == "total_mismatch"] == []
+
+    def test_a_missing_local_tax_is_still_caught(self) -> None:
+        """Widening the rule must not blind it."""
+        inv = make_invoice(total="500.00", traslados_locales="10.00")
+        assert any(a.kind == "total_mismatch" for a in detect_arithmetic(inv))
+
+    def test_cent_rounding_across_many_lines_is_tolerated(self) -> None:
+        """Each line rounds to cents, so n lines can drift half a cent each. A
+        real 4-line invoice was off by 0.02 and reported critical."""
+        # The real shape: each line importe is already rounded to cents, and
+        # their sum lands two cents above a subtotal the issuer computed before
+        # rounding.
+        lines = [
+            Concepto(
+                line_no=i + 1, descripcion=f"L{i}", cantidad="1",
+                valor_unitario=amount, importe=amount,
+            )
+            for i, amount in enumerate(["103.45", "103.45", "103.45", "103.46"])
+        ]
+        inv = make_invoice(
+            subtotal="413.79", total="413.79", conceptos=lines, impuestos=[]
+        )
+        assert inv.subtotal_esperado == Decimal("413.81")
+        assert [a for a in detect_arithmetic(inv) if a.kind == "subtotal_mismatch"] == []
+
+    def test_a_single_line_two_cents_off_is_still_wrong(self) -> None:
+        """The tolerance scales with line count precisely so it does not go
+        slack where there is nothing to round."""
+        inv = make_invoice(
+            subtotal="100.00", total="100.00", impuestos=[],
+            conceptos=[
+                Concepto(
+                    line_no=1, descripcion="Servicio", cantidad="1",
+                    valor_unitario="100.02", importe="100.02",
+                )
+            ],
+        )
+        assert any(a.kind == "subtotal_mismatch" for a in detect_arithmetic(inv))

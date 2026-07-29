@@ -134,3 +134,24 @@ class TestScrubOnOwnMessages:
         out = _scrub("unknown ClaveProdServ 80161501 and ClaveUnidad H87")
         assert "80161501" in out
         assert "H87" in out
+
+
+class TestPairing:
+    """A PDF and its XML twin, as a real delivery names them."""
+
+    def test_pairs_match_across_case(self, tmp_path) -> None:
+        """The batch this was written against names PDFs with a lowercase UUID
+        and XMLs with the same UUID uppercased. Exact-stem matching found 4
+        pairs in it instead of 93."""
+        from evals.vision_accuracy import find_pairs
+
+        (tmp_path / "a1b2c3d4-0000-4000-8000-000000000001.pdf").write_bytes(b"%PDF-")
+        (tmp_path / "A1B2C3D4-0000-4000-8000-000000000001.xml").write_bytes(b"<x/>")
+        assert len(find_pairs(tmp_path)) == 1
+
+    def test_a_pdf_without_its_xml_is_skipped(self, tmp_path) -> None:
+        """There would be nothing to score it against."""
+        from evals.vision_accuracy import find_pairs
+
+        (tmp_path / "orphan.pdf").write_bytes(b"%PDF-")
+        assert find_pairs(tmp_path) == []

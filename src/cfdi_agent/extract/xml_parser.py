@@ -34,6 +34,9 @@ CFDI_NAMESPACES = (
     "http://www.sat.gob.mx/cfd/3",
 )
 TFD_NAMESPACE = "http://www.sat.gob.mx/TimbreFiscalDigital"
+# State-level taxes (lodging tax and similar). Not federal, so they are absent
+# from cfdi:Impuestos, but they are part of the total the issuer charges.
+IMPLOCAL_NAMESPACE = "http://www.sat.gob.mx/implocal"
 
 
 class CfdiParseError(ValueError):
@@ -96,6 +99,14 @@ def parse_cfdi_bytes(data: bytes) -> ParsedInvoice:
     if not invoice_uuid:
         raise CfdiParseError("TimbreFiscalDigital carries no UUID attribute")
 
+    implocal = root.find(
+        f'{cfdi("Complemento")}/{_qname(IMPLOCAL_NAMESPACE, "ImpuestosLocales")}'
+    )
+    # Attribute strings go straight in: the model's `Money` type coerces them,
+    # the same way SubTotal and Total already do.
+    traslados_locales = implocal.get("TotaldeTraslados") if implocal is not None else "0"
+    retenciones_locales = implocal.get("TotaldeRetenciones") if implocal is not None else "0"
+
     conceptos = _parse_conceptos(root, cfdi)
     impuestos = _parse_impuestos(root, cfdi, conceptos_node=root.find(cfdi("Conceptos")))
 
@@ -119,6 +130,8 @@ def parse_cfdi_bytes(data: bytes) -> ParsedInvoice:
         uso_cfdi=receptor.get("UsoCFDI"),
         conceptos=conceptos,
         impuestos=impuestos,
+        traslados_locales=traslados_locales or "0",
+        retenciones_locales=retenciones_locales or "0",
         source="xml",
     )
 
