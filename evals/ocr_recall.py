@@ -87,13 +87,26 @@ def _present(inv, text: str) -> dict[str, bool]:
     }
 
 
+# Not a model. Reads the PDF's own text layer, which most CFDIs carry because
+# they are generated rather than scanned. Included here so it is scored by the
+# same harness on the same corpus as the models it is competing with -- an
+# alternative measured a different way is not a comparison.
+TEXT_LAYER = "textlayer"
+
+
 def transcribe(
     pdf: Path, *, model: str, prompt: str, base_url: str, dpi: int, timeout: float
 ) -> tuple[str, float]:
     """One page through the OCR model, cached by (model, prompt, file)."""
     import httpx
 
+    from cfdi_agent.extract.pdf_text import extract_text_layer
     from cfdi_agent.extract.providers.openai_compat import rasterize_pdf
+
+    if model == TEXT_LAYER:
+        started = time.perf_counter()
+        text = extract_text_layer(pdf.read_bytes())
+        return text, time.perf_counter() - started
 
     key = hashlib.sha256(
         f"{model}|{prompt}|{dpi}|{pdf.name}".encode()

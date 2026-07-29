@@ -383,3 +383,71 @@ def test_hallucinated_amounts_still_have_to_survive_validation() -> None:
     inv = validate_extraction(payload).to_parsed()
     result = validate_invoice(inv, company_rfc="XAXX010101000")
     assert any(a.kind == "total_mismatch" for a in result.anomalies)
+
+
+class TestPdfTextLayer:
+    """Tier 0 for PDFs. Measured better than either vision model on real
+    invoices, and it was not checked until after both were downloaded."""
+
+    def test_a_generated_pdf_yields_its_text(self) -> None:
+        pytest.importorskip("pypdfium2")
+        from cfdi_agent.extract.pdf_text import extract_text_layer, has_text_layer
+
+        pdf = _pdf_with_text("Folio Fiscal " + "A" * 300)
+        assert "Folio Fiscal" in extract_text_layer(pdf)
+        assert has_text_layer(pdf)
+
+    def test_a_scan_is_routed_to_the_vision_path(self) -> None:
+        """An image-only PDF has no text to read, and must say so."""
+        pytest.importorskip("pypdfium2")
+        from cfdi_agent.extract.pdf_text import has_text_layer
+
+        assert not has_text_layer(_one_page_pdf())
+
+    def test_garbage_is_not_mistaken_for_a_scan(self) -> None:
+        from cfdi_agent.extract.pdf_text import TextLayerUnavailable, extract_text_layer
+
+        with pytest.raises(TextLayerUnavailable):
+            extract_text_layer(b"this is not a PDF")
+
+    def test_the_uuid_is_recovered_without_a_model(self) -> None:
+        """The field a vision model is likeliest to corrupt: a long string with
+        no linguistic redundancy to fall back on."""
+        from cfdi_agent.extract.pdf_text import find_uuid
+
+        found = find_uuid("Folio Fiscal: 3f2504e0-4f89-41d3-9a0c-0305e82c3301 SAT")
+        assert found == "3F2504E0-4F89-41D3-9A0C-0305E82C3301"
+
+    def test_a_stamp_block_rendered_as_an_image_returns_none(self) -> None:
+        """One of the four real invoices does exactly this. Guessing would be
+        worse than admitting the vision path is needed."""
+        from cfdi_agent.extract.pdf_text import find_uuid
+
+        assert find_uuid("Folio Fiscal\nNo. de serie del certificado del SAT") is None
+
+
+def _pdf_with_text(text: str) -> bytes:
+    """A one-page PDF carrying a real text layer."""
+    stream = f"BT /F1 12 Tf 40 700 Td ({text}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % index + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
+    )
+    return bytes(out)
