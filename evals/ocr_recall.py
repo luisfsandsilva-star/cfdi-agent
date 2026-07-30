@@ -58,6 +58,7 @@ DEFAULT_PROMPT = "Convert this page to docling."
 CACHE_DIR = Path("data/.ocr_cache")
 
 NUMBER = re.compile(r"\d[\d,]*\.?\d*")
+CENTS = Decimal("0.01")
 
 
 class TranscriptionFailed(RuntimeError):
@@ -91,6 +92,28 @@ def _numbers(text: str) -> set[Decimal]:
     return out
 
 
+def _has_money(target: Decimal, found: set[Decimal]) -> bool:
+    """Whether an amount is on the page, at the precision the XML stores it.
+
+    Exact set membership was wrong, and it reported six invoices as missing
+    their line amounts when every one of them was there. The page prints the
+    unrounded product -- `515.517242` -- while the XML's `Importe` attribute is
+    that value rounded to cents, `515.52`. A downstream stage can round; it
+    cannot invent. So the field is present.
+    """
+    for value in found:
+        if value == target:
+            return True
+        try:
+            if value.quantize(CENTS) == target:
+                return True
+        except InvalidOperation:
+            # A certificate serial is a 20-digit integer on the same page.
+            # Quantizing it overflows, and it was never a candidate anyway.
+            continue
+    return False
+
+
 def _present(inv, text: str) -> dict[str, bool]:
     flat = re.sub(r"\s", "", text).upper()
     nums = _numbers(text)
@@ -98,9 +121,9 @@ def _present(inv, text: str) -> dict[str, bool]:
         "uuid": inv.uuid.upper() in flat,
         "rfc_emisor": inv.rfc_emisor.upper() in flat,
         "rfc_receptor": inv.rfc_receptor.upper() in flat,
-        "subtotal": inv.subtotal in nums,
-        "total": inv.total in nums,
-        "line_amounts": all(c.importe in nums for c in inv.conceptos),
+        "subtotal": _has_money(inv.subtotal, nums),
+        "total": _has_money(inv.total, nums),
+        "line_amounts": all(_has_money(c.importe, nums) for c in inv.conceptos),
     }
 
 

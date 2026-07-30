@@ -26,10 +26,21 @@ columns moved by more than 20 points once the corpus grew.
 | `rfc_receptor` | 89/93 · 96% | **93/93 · 100%** |
 | `subtotal` | 80/93 · 86% | **93/93 · 100%** |
 | `total` | 69/93 · 74% | **93/93 · 100%** |
-| `line_amounts` | 74/93 · 80% | 87/93 · 94% |
-| **fields found** | 466/558 · **83%** | 551/558 · **99%** |
+| `line_amounts` | 79/93 · 85% | **93/93 · 100%** |
+| **fields found** | 471/558 · **84%** | 557/558 · **99.8%** |
 | hard failures | 4 | 0 |
 | latency / invoice | 10 s | **<0.1 s** |
+
+The single text-layer miss is the one invoice that rasterizes its stamp block:
+the labels are text, the UUID is a picture. That is the document the vision
+path exists for, and it is why these two are complementary rather than ranked.
+
+An earlier version of this table read `line_amounts` 87/93 for the text layer
+and 74/93 for PaddleOCR. Both were understated by the comparison, not by the
+method: a PDF prints the unrounded product — `515.517242` — while the XML's
+`Importe` attribute is that value rounded to cents, `515.52`. Exact set
+membership scored a present value as absent. Amounts are now matched at the
+precision the XML stores them.
 
 `granite-docling` and the full PaddleOCR pipeline were measured on the first
 four invoices only, at 14/24 and 22/24. Those numbers are not comparable to

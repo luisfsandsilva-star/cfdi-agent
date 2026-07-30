@@ -12,6 +12,7 @@ reading the queue, and it hid the fact that the vision path was never wired in.
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 import pytest
@@ -100,7 +101,20 @@ class StubProvider(LLMProvider):
         )
 
     def complete(self, system: str, user: str, *, max_tokens: int = 1024):
-        raise NotImplementedError
+        """The text-layer path goes through here, not through extract_invoice."""
+        self.calls.append("text")
+        self.last_user = user
+        if self._fail:
+            raise ProviderError("the model declined the request")
+        return LLMResult(
+            content=json.dumps(EXTRACTION),
+            provider=self.name,
+            model=self.model,
+            latency_ms=1234,
+            tokens_in=800,
+            tokens_out=380,
+            cost_usd=Decimal("0.002100"),
+        )
 
     def embed(self, texts: list[str]):
         raise NotImplementedError
@@ -249,3 +263,115 @@ def test_office_documents_are_refused_clearly() -> None:
     """A .docx is a ZIP. It must not be mistaken for anything readable."""
     with pytest.raises(UnroutableDocument):
         route_document(b"PK\x03\x04\x14\x00", filename="factura.docx")
+
+
+# --------------------------------------------------------------- text layer
+
+
+def _pdf_with_text(text: str) -> bytes:
+    """A one-page PDF that carries a real text layer, as generated CFDIs do."""
+    stream = f"BT /F1 12 Tf 40 700 Td ({text}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % index + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
+    )
+    return bytes(out)
+
+
+class TestTextLayerRouting:
+    """A PDF is two cases, and treating it as one sent every invoice to a
+    vision model. Measured on 93 real pairs, the text layer holds 99% of the
+    checked fields against 83% for the best local VLM reading the same pages.
+    """
+
+    def test_a_generated_pdf_is_read_not_looked_at(self) -> None:
+        pytest.importorskip("pypdfium2")
+        stub = StubProvider()
+        routed = route_document(
+            _pdf_with_text("Folio Fiscal " + "X" * 300),
+            filename="factura.pdf",
+            provider=stub,
+        )
+        # `complete`, not `extract_invoice`: no image was ever rendered.
+        assert stub.calls == ["text"]
+        assert routed.media_type == PDF
+        assert routed.invoice.total == Decimal("116.00")
+
+    def test_the_page_text_reaches_the_model(self) -> None:
+        pytest.importorskip("pypdfium2")
+        stub = StubProvider()
+        route_document(
+            _pdf_with_text("Subtotal 100.00 " + "Y" * 250),
+            filename="factura.pdf",
+            provider=stub,
+        )
+        assert "Subtotal 100.00" in stub.last_user
+
+    def test_a_scan_still_goes_to_vision(self) -> None:
+        """An image-only PDF has no text to read. That is what the vision path
+        is for, and the switch has to send it there."""
+        stub = StubProvider()
+        routed = route_document(b"%PDF-1.7 no text layer here", provider=stub)
+        assert stub.calls == [PDF]
+        assert routed.tier == 2
+
+    def test_the_printed_uuid_overrides_the_model(self) -> None:
+        """The UUID is the field a model is likeliest to corrupt and the one
+        that decides which invoice a document is. When the file states it
+        verbatim, re-typing it through a model is the mistake this project
+        argues against."""
+        pytest.importorskip("pypdfium2")
+        printed = "BD401C02-1111-4222-8333-444444444444"
+        routed = route_document(
+            _pdf_with_text(f"Folio Fiscal {printed} " + "Z" * 250),
+            filename="factura.pdf",
+            provider=StubProvider(),
+        )
+        assert routed.invoice.uuid == printed
+        assert routed.invoice.uuid != EXTRACTION["uuid"]
+
+    def test_text_layer_usage_is_carried_for_the_cost_report(self) -> None:
+        """Cheaper input, and the row has to say so or the cost report lies."""
+        pytest.importorskip("pypdfium2")
+        routed = route_document(
+            _pdf_with_text("Total " + "W" * 300),
+            filename="f.pdf",
+            provider=StubProvider(),
+        )
+        assert routed.tokens_in == 800
+        assert routed.cost_usd == Decimal("0.002100")
+
+    def test_a_local_backend_on_the_text_path_is_tier_1(self) -> None:
+        pytest.importorskip("pypdfium2")
+        routed = route_document(
+            _pdf_with_text("Total " + "V" * 300),
+            filename="f.pdf",
+            provider=StubProvider("local"),
+        )
+        assert routed.tier == 1
+
+    def test_a_failure_names_the_path_that_failed(self) -> None:
+        pytest.importorskip("pypdfium2")
+        with pytest.raises(UnroutableDocument, match="capa de texto"):
+            route_document(
+                _pdf_with_text("Total " + "U" * 300),
+                filename="f.pdf",
+                provider=StubProvider(fail=True),
+            )

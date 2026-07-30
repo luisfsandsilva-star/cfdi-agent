@@ -32,6 +32,7 @@ import argparse
 import statistics
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -71,6 +72,10 @@ class Run:
     documents: int = 0
     exact_documents: int = 0
     failures: list[str] = field(default_factory=list)
+    # Which tier actually ran, per document. A PDF with a text layer and a
+    # scanned PDF take different routes, and one accuracy number that hides
+    # which one ran is not interpretable.
+    tiers: Counter[int] = field(default_factory=Counter)
 
 
 # ---------------------------------------------------------------- comparison
@@ -112,18 +117,6 @@ def _expected(inv) -> dict:
     }
 
 
-def _actual(extraction) -> dict:
-    return {
-        "uuid": extraction.uuid,
-        "rfc_emisor": extraction.rfc_emisor,
-        "rfc_receptor": extraction.rfc_receptor,
-        "subtotal": extraction.subtotal,
-        "total": extraction.total,
-        "moneda": extraction.moneda,
-        "n_conceptos": len(extraction.conceptos),
-    }
-
-
 # ------------------------------------------------------------------- pairing
 
 
@@ -153,6 +146,16 @@ def find_pairs(directory: Path) -> list[tuple[Path, Path]]:
 
 
 def score(pairs: list[tuple[Path, Path]], provider) -> Run:
+    """Route each PDF the way the pipeline routes it, and score the result.
+
+    Deliberately through `route_document` rather than calling the provider's
+    vision method directly. The first version did the latter, and it could not
+    see the routing decision at all: a PDF with a text layer now goes to a text
+    model, and a harness that reaches past the router keeps measuring a path
+    production no longer takes. It also made the harness unusable with a
+    text-only model, which is the point of the text-layer route.
+    """
+    from cfdi_agent.extract.router import route_document
     from cfdi_agent.extract.xml_parser import parse_cfdi_bytes
 
     run = Run(scores={name: FieldScore() for name in COMPARED})
@@ -160,8 +163,8 @@ def score(pairs: list[tuple[Path, Path]], provider) -> Run:
         truth = _expected(parse_cfdi_bytes(xml_path.read_bytes()))
         started = time.perf_counter()
         try:
-            result = provider.extract_invoice(
-                pdf_path.read_bytes(), media_type="application/pdf"
+            routed = route_document(
+                pdf_path.read_bytes(), filename=pdf_path.name, provider=provider
             )
         except Exception as exc:  # noqa: BLE001 - a failure is a measurement
             run.failures.append(type(exc).__name__)
@@ -169,7 +172,8 @@ def score(pairs: list[tuple[Path, Path]], provider) -> Run:
             continue
         run.latencies.append((time.perf_counter() - started) * 1000)
 
-        got = _actual(result.content)
+        run.tiers[routed.tier] += 1
+        got = _expected(routed.invoice)
         hits = 0
         for name in COMPARED:
             run.scores[name].total += 1
@@ -178,10 +182,10 @@ def score(pairs: list[tuple[Path, Path]], provider) -> Run:
                 hits += 1
         run.documents += 1
         run.exact_documents += hits == len(COMPARED)
-        run.tokens_in += result.tokens_in or 0
-        run.tokens_out += result.tokens_out or 0
-        if result.cost_usd:
-            run.cost_usd += Decimal(str(result.cost_usd))
+        run.tokens_in += routed.tokens_in or 0
+        run.tokens_out += routed.tokens_out or 0
+        if routed.cost_usd:
+            run.cost_usd += Decimal(str(routed.cost_usd))
     return run
 
 
@@ -217,6 +221,13 @@ def render(run: Run, *, provider_name: str, model: str, dpi: int) -> None:
     critical_ok = sum(
         1 for name in CRITICAL if run.scores[name].correct == run.scores[name].total
     )
+    if run.tiers:
+        print("Route taken")
+        for tier, n in sorted(run.tiers.items()):
+            label = {0: "deterministic", 1: "local model", 2: "API"}.get(tier, "?")
+            print(f"  tier {tier} ({label:<14}) {n:>4}")
+        print()
+
     print(f"Fully correct invoices        {run.exact_documents}/{scored}")
     print(f"Critical fields at 100%       {critical_ok}/{len(CRITICAL)}")
     print()
