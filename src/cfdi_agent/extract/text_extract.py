@@ -79,11 +79,17 @@ def extract_from_text_layer(
 
     provider = provider or get_provider()
     started = time.perf_counter()
-    result = provider.complete(
-        EXTRACTION_SYSTEM,
-        TEXT_EXTRACTION_PROMPT.format(text=text),
-        max_tokens=4096,
-    )
+    prompt = TEXT_EXTRACTION_PROMPT.format(text=text)
+    try:
+        # The values are in the text. Deliberating about them costs tokens and
+        # buys nothing; see `OpenAICompatProvider.complete`.
+        result = provider.complete(
+            EXTRACTION_SYSTEM, prompt, max_tokens=4096, thinking=False
+        )
+    except TypeError:
+        # A provider that does not accept the hint. The Anthropic path manages
+        # its own thinking budget and has no such parameter.
+        result = provider.complete(EXTRACTION_SYSTEM, prompt, max_tokens=4096)
 
     try:
         extraction = validate_extraction(_parse_json_object(result.content))

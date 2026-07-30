@@ -161,7 +161,40 @@ class OpenAICompatProvider(LLMProvider):
             validate_extraction(_parse_json_object(text)), body, latency_ms
         )
 
-    def complete(self, system: str, user: str, *, max_tokens: int = 1024) -> LLMResult:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        max_tokens: int = 1024,
+        thinking: bool = True,
+    ) -> LLMResult:
+        """One completion. `thinking=False` asks the server to skip reasoning.
+
+        A reasoning model spends its budget before it answers, and qwen3 spends
+        ~3,800 tokens per invoice deliberating over what is, at bottom, a
+        copy: the values are already in the text handed to it. So the request
+        carries the standard hint.
+
+        **Measured caveat: Ollama ignores it.** Four ways of asking were tried
+        against `qwen3:4b` on Ollama's OpenAI-compatible endpoint, and all four
+        produced the same token count:
+
+            baseline            346
+            think: false        346
+            /no_think in prompt 337
+            reasoning_effort    346
+
+        So on that server the reasoning cost is not optional, and the ~40 s per
+        invoice it produces is a real property of that configuration rather
+        than a setting left wrong. vLLM and llama.cpp do honour
+        `chat_template_kwargs`; the hint is kept for them, and a server that
+        ignores it degrades to the same answer more slowly, which is the right
+        failure mode for a hint.
+
+        The agent loop leaves reasoning on deliberately, since chaining queries
+        is the whole job there.
+        """
         payload = {
             "model": self.model,
             "max_tokens": max_tokens,
@@ -171,6 +204,10 @@ class OpenAICompatProvider(LLMProvider):
                 {"role": "user", "content": user},
             ],
         }
+        if not thinking:
+            # Ollama and vLLM both read this; a server that does not simply
+            # ignores it, which is the right failure mode for a hint.
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         body, latency_ms = self._post("/chat/completions", payload)
         return self._to_result(self._first_message(body), body, latency_ms)
 
