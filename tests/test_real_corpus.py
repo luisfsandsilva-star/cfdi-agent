@@ -155,3 +155,50 @@ class TestPairing:
 
         (tmp_path / "orphan.pdf").write_bytes(b"%PDF-")
         assert find_pairs(tmp_path) == []
+
+    def test_a_pair_is_found_when_the_filenames_disagree(self, tmp_path) -> None:
+        """The UUID is the invoice's identity; the filename is whoever last
+        saved it. Two PDFs in a real delivery had their XML sitting right there
+        under a different name, and stem matching called them orphans."""
+        from evals.vision_accuracy import find_pairs
+
+        uuid = "9416E5FD-7CE5-4740-B64D-37205EEDBD2E"
+        (tmp_path / "scan-from-email.pdf").write_bytes(_pdf_naming(uuid))
+        (tmp_path / f"{uuid}.xml").write_bytes(_cfdi_with_uuid(uuid))
+        assert len(find_pairs(tmp_path)) == 1
+
+    def test_a_pdf_whose_uuid_has_no_xml_stays_unpaired(self, tmp_path) -> None:
+        from evals.vision_accuracy import find_pairs
+
+        (tmp_path / "solo.pdf").write_bytes(
+            _pdf_naming("11111111-2222-4333-8444-555555555555")
+        )
+        (tmp_path / "otra.xml").write_bytes(
+            _cfdi_with_uuid("99999999-8888-4777-8666-555555555555")
+        )
+        assert find_pairs(tmp_path) == []
+
+
+def _pdf_naming(uuid: str) -> bytes:
+    from tests.test_router import _pdf_with_text
+
+    return _pdf_with_text(f"Folio Fiscal {uuid} " + "X" * 250)
+
+
+def _cfdi_with_uuid(uuid: str) -> bytes:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4"
+  xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+  Version="4.0" Fecha="2026-03-01T10:00:00" SubTotal="100.00" Total="116.00"
+  Moneda="MXN">
+  <cfdi:Emisor Rfc="AAA010101AAA" Nombre="Prov"/>
+  <cfdi:Receptor Rfc="XAXX010101000" Nombre="Cliente"/>
+  <cfdi:Conceptos>
+    <cfdi:Concepto ClaveProdServ="01010101" Cantidad="1" ClaveUnidad="H87"
+      Descripcion="Servicio" ValorUnitario="100.00" Importe="100.00"/>
+  </cfdi:Conceptos>
+  <cfdi:Complemento>
+    <tfd:TimbreFiscalDigital Version="1.1" UUID="{uuid}"
+      FechaTimbrado="2026-03-01T10:30:00"/>
+  </cfdi:Complemento>
+</cfdi:Comprobante>""".encode()

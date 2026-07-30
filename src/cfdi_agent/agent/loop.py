@@ -149,7 +149,17 @@ def build_tools(conn: Any) -> list:
 
 
 def ask(question: str, *, verbose: bool = False) -> str:
-    """Run the agent until it stops calling tools; return the final answer."""
+    """Run the agent until it stops calling tools; return the final answer.
+
+    Dispatches on the configured provider. The local path is a separate module
+    because the two APIs disagree on who owns the loop, not just on field
+    names — see `local_loop`.
+    """
+    if get_config().llm_provider == "local":
+        from cfdi_agent.agent.local_loop import ask_local
+
+        return ask_local(question, verbose=verbose)
+
     import anthropic
 
     cfg = get_config()

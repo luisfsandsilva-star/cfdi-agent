@@ -123,23 +123,50 @@ def _expected(inv) -> dict:
 def find_pairs(directory: Path) -> list[tuple[Path, Path]]:
     """PDFs that have an XML of the same invoice beside them.
 
-    Matched on filename stem, which is how a PAC delivers them and how an
-    accounting inbox stores them. A PDF without its XML is skipped rather than
-    guessed at — there would be nothing to score it against.
+    Matched on the **UUID**, not the filename. The UUID is the invoice's fiscal
+    identity; a filename is whoever last saved the file. Both are checked, in
+    that order, because a scanned PDF has no readable UUID and the filename is
+    then all there is.
 
-    Case-insensitively, because a real delivery does not agree with itself: the
-    batch this was written against names every PDF with a lowercase UUID and
-    every XML with the same UUID in uppercase. An exact-stem match found 4
-    pairs in it instead of 93.
+    Two rounds of this were wrong before it worked. Exact-stem matching found 4
+    pairs in a 95-document delivery, because every PDF is named with a
+    lowercase UUID and every XML with the same UUID uppercased. Case-insensitive
+    stems found 93 — and six PDFs still looked unpaired, of which two had an XML
+    sitting right there under a different filename.
     """
-    xmls = {
-        p.stem.lower(): p for p in directory.rglob("*") if p.suffix.lower() == ".xml"
-    }
-    return sorted(
-        (p, xmls[p.stem.lower()])
-        for p in directory.rglob("*")
-        if p.suffix.lower() == ".pdf" and p.stem.lower() in xmls
+    from cfdi_agent.extract.pdf_text import (
+        TextLayerUnavailable,
+        extract_text_layer,
+        find_uuid,
     )
+    from cfdi_agent.extract.xml_parser import CfdiParseError, parse_cfdi_bytes
+
+    by_stem: dict[str, Path] = {}
+    by_uuid: dict[str, Path] = {}
+    for xml in directory.rglob("*"):
+        if xml.suffix.lower() != ".xml":
+            continue
+        by_stem[xml.stem.lower()] = xml
+        try:
+            by_uuid[parse_cfdi_bytes(xml.read_bytes()).uuid.upper()] = xml
+        except (CfdiParseError, OSError, ValueError):
+            # Not a readable CFDI. The stem is still a usable key.
+            continue
+
+    pairs: list[tuple[Path, Path]] = []
+    for pdf in directory.rglob("*"):
+        if pdf.suffix.lower() != ".pdf":
+            continue
+        xml = by_stem.get(pdf.stem.lower())
+        if xml is None:
+            try:
+                uuid = find_uuid(extract_text_layer(pdf.read_bytes()))
+            except TextLayerUnavailable:
+                uuid = None
+            xml = by_uuid.get(uuid) if uuid else None
+        if xml is not None:
+            pairs.append((pdf, xml))
+    return sorted(pairs)
 
 
 # ------------------------------------------------------------------- running
