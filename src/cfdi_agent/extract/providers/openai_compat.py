@@ -168,6 +168,7 @@ class OpenAICompatProvider(LLMProvider):
         *,
         max_tokens: int = 1024,
         thinking: bool = True,
+        json_schema: dict | None = None,
     ) -> LLMResult:
         """One completion. `thinking=False` asks the server to skip reasoning.
 
@@ -208,6 +209,17 @@ class OpenAICompatProvider(LLMProvider):
             # Ollama and vLLM both read this; a server that does not simply
             # ignores it, which is the right failure mode for a hint.
             payload["chat_template_kwargs"] = {"enable_thinking": False}
+        if json_schema is not None:
+            # Without this the model invents field names. A 3B handed the same
+            # prompt and no schema answered with `NombreEmisor` and
+            # `RfcReceptorCFDI` -- plausible Spanish, wrong keys, 31 validation
+            # errors. `extract_invoice` always constrained its output; the text
+            # path was built on `complete`, which did not, and inherited a bug
+            # the vision path never had.
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "invoice_extraction", "schema": json_schema},
+            }
         body, latency_ms = self._post("/chat/completions", payload)
         return self._to_result(self._first_message(body), body, latency_ms)
 
@@ -264,9 +276,25 @@ class OpenAICompatProvider(LLMProvider):
     @staticmethod
     def _first_message(body: dict) -> str:
         try:
-            return body["choices"][0]["message"]["content"] or ""
+            choice = body["choices"][0]
+            content = choice["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderError(f"unexpected response shape: {str(body)[:200]}") from exc
+
+        # Empty content with `finish_reason: length` is a token budget that ran
+        # out, and saying so is the difference between a one-line fix and an
+        # afternoon. A reasoning model makes this the *common* failure: qwen3
+        # spent all 4,096 tokens deliberating and never began the answer, and
+        # the error read "no JSON object in model output: ''" -- a description
+        # of the symptom that points nowhere near the cause.
+        if not content.strip() and choice.get("finish_reason") == "length":
+            used = (body.get("usage") or {}).get("completion_tokens", "?")
+            raise ProviderError(
+                f"the model used its whole {used}-token budget without "
+                f"producing an answer. Raise max_tokens; a reasoning model "
+                f"needs room for the reasoning *and* the reply."
+            )
+        return content
 
     def _to_result(self, content: Any, body: dict, latency_ms: int) -> LLMResult:
         usage = body.get("usage") or {}

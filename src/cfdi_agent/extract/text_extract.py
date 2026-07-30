@@ -42,11 +42,21 @@ from cfdi_agent.extract.providers.base import (
     validate_extraction,
 )
 from cfdi_agent.extract.providers.openai_compat import _parse_json_object
-from cfdi_agent.schemas import ParsedInvoice
+from cfdi_agent.schemas import InvoiceExtraction, ParsedInvoice
 
 # Enough for a long multi-page invoice's text without being able to blow up a
 # context window. ~800 tokens is typical for a single page; this is generous.
 MAX_TEXT_CHARS = 40_000
+
+# Headroom for a reasoning model, not for the answer. A CFDI's JSON is ~2,600
+# characters; qwen3:4b spends ~10,000 tokens reaching it, almost all of them
+# deliberating over what is a copy. At 4,096 every one of 95 real invoices came
+# back empty with `finish_reason: length`.
+#
+# The cost of that reasoning is real and not tunable on Ollama (see
+# `OpenAICompatProvider.complete`), which makes a *non-reasoning* model the
+# right tool for this path rather than a bigger budget.
+MAX_OUTPUT_TOKENS = 16384
 
 TEXT_EXTRACTION_PROMPT = """\
 A continuación está el texto extraído de una factura CFDI en PDF. El texto es \
@@ -84,12 +94,18 @@ def extract_from_text_layer(
         # The values are in the text. Deliberating about them costs tokens and
         # buys nothing; see `OpenAICompatProvider.complete`.
         result = provider.complete(
-            EXTRACTION_SYSTEM, prompt, max_tokens=4096, thinking=False
+            EXTRACTION_SYSTEM,
+            prompt,
+            max_tokens=MAX_OUTPUT_TOKENS,
+            thinking=False,
+            # The field names are not guessable and a small model does not
+            # guess them: without the schema a 3B answered in invented keys.
+            json_schema=InvoiceExtraction.model_json_schema(),
         )
     except TypeError:
         # A provider that does not accept the hint. The Anthropic path manages
         # its own thinking budget and has no such parameter.
-        result = provider.complete(EXTRACTION_SYSTEM, prompt, max_tokens=4096)
+        result = provider.complete(EXTRACTION_SYSTEM, prompt, max_tokens=MAX_OUTPUT_TOKENS)
 
     try:
         extraction = validate_extraction(_parse_json_object(result.content))

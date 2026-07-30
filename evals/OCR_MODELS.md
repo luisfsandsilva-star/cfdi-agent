@@ -163,3 +163,60 @@ for.
 Transcriptions are cached under `data/.ocr_cache/`, so re-running a model and
 prompt already measured costs nothing. `data/` is gitignored — the cache
 holds full invoice text and must never be committed.
+
+
+## End to end: the text-layer route, scored on extraction
+
+The tables above measure **presence** — is the value in the text at all. This
+measures what the pipeline actually produces: `route_document` on 95 real
+PDFs, scored against each invoice's own XML.
+
+`qwen2.5:3b` on a GTX 1660 Ti, 200 DPI, no API key:
+
+| field | accuracy |
+|---|---:|
+| `uuid` | 70/72 · **97%** |
+| `rfc_emisor` | 55/72 · 76% |
+| `rfc_receptor` | 72/72 · **100%** |
+| `subtotal` | 70/72 · 97% |
+| `total` | 70/72 · **97%** |
+| `moneda` | 69/72 · 96% |
+| `n_conceptos` | 68/72 · 94% |
+
+Fully correct invoices 49/72. p50 latency 10.4 s. 23 of 95 documents failed to
+extract at all, and the validation errors are concentrated in line-item
+numerics — `cantidad`, `valor_unitario`, `tasa` — where a 3B emits values the
+schema rejects.
+
+`total` at 97% against 25% for `qwen2.5vl:3b` reading the same invoices as
+images. The transcription step was most of the error, and removing it is worth
+more than a bigger model.
+
+`uuid` at 97% is not the model's doing: `pdf_text.find_uuid` takes it by regex
+and overrides whatever the model typed. `rfc_emisor` at 76% is the same problem
+without the same treatment — a long opaque string a model has no way to reason
+about. It is deterministically recoverable too: a CFDI's text layer holds three
+RFC-shaped tokens, the receptor is known from `COMPANY_RFC`, and the PAC's
+follows "proveedor de certificación". Not built yet, and named here rather than
+left as an unexplained 76%.
+
+### Three bugs this run found, all mine
+
+**A token budget that a reasoning model ate.** The first attempt scored 0/95
+with `qwen3:4b`. `max_tokens` was 4096 and the model spent all of it thinking,
+returning `finish_reason: length` and empty content. The error read "no JSON
+object in model output: ''" — a description of the symptom pointing nowhere
+near the cause. Empty content plus a length stop now says so.
+
+**A text path built on an unconstrained call.** `extract_invoice` always sent
+`response_format: json_schema`. `complete` did not, and the text route was
+built on `complete`, so the model was guessing field names from the system
+prompt: a 3B answered with `NombreEmisor` and `RfcReceptorCFDI` — plausible
+Spanish, wrong keys, 31 validation errors per document. The vision path never
+had this bug; the new path inherited nothing and reintroduced it.
+
+**A reasoning cost assumed to be tunable.** Four ways of disabling reasoning on
+Ollama, all no-ops (346 / 346 / 337 / 346 tokens). qwen3:4b costs ~10,000
+tokens and three minutes per invoice there; `qwen2.5:3b` costs ~460 and six
+seconds. For mapping text that already contains the answer, a non-reasoning
+model is not a compromise — it is the correct tool.
